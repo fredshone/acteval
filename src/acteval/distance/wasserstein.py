@@ -4,7 +4,6 @@ from scipy.stats import wasserstein_distance
 
 try:
     import torch
-    import torch.nn as nn
 
     _TORCH_AVAILABLE = True
 except ImportError:
@@ -71,9 +70,7 @@ def sliced_wasserstein(x: list[list], y: list[list], num_proj=100):
     return np.mean(ests)
 
 
-def sinkhorn(
-    x: list[list], y: list[list], eps=0.01, max_iter=10, reduction=None
-):
+def sinkhorn(x: list[list], y: list[list], eps=0.01, max_iter=10, reduction=None):
     if not _TORCH_AVAILABLE:
         raise ImportError("torch is required for sinkhorn")
     x = torch.tensor(x, dtype=torch.float)
@@ -125,17 +122,13 @@ class SinkhornDistance:
         # both marginals are fixed with equal weights
         print("mu")
         mu = (
-            torch.empty(
-                batch_size, x_points, dtype=torch.float, requires_grad=False
-            )
+            torch.empty(batch_size, x_points, dtype=torch.float, requires_grad=False)
             .fill_(1.0 / x_points)
             .squeeze()
         )
         print("nu")
         nu = (
-            torch.empty(
-                batch_size, y_points, dtype=torch.float, requires_grad=False
-            )
+            torch.empty(batch_size, y_points, dtype=torch.float, requires_grad=False)
             .fill_(1.0 / y_points)
             .squeeze()
         )
@@ -154,10 +147,7 @@ class SinkhornDistance:
             u1 = u  # useful to check the update
             u = (
                 self.eps
-                * (
-                    torch.log(mu + 1e-8)
-                    - torch.logsumexp(self.M(C, u, v), dim=-1)
-                )
+                * (torch.log(mu + 1e-8) - torch.logsumexp(self.M(C, u, v), dim=-1))
                 + u
             )
             v = (

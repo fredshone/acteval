@@ -8,9 +8,7 @@ from pandas import DataFrame
 from acteval.density.features.frequency import binned_activity_density
 
 
-def frequency_plots(
-    observed: DataFrame, ys: Optional[dict[DataFrame]], **kwargs
-):
+def frequency_plots(observed: DataFrame, ys: Optional[dict[DataFrame]], **kwargs):
     if ys is None:
         ys = dict()
     acts = list(observed.act.value_counts(ascending=False).index)
@@ -76,9 +74,7 @@ def plot_agg_acts(
         datetime(2021, 11, 1, 0) + timedelta(minutes=i * step)
         for i in range(len(df.index))
     ]
-    fig = df.plot(
-        kind="bar", stacked=True, width=1, ax=ax, legend=legend, **kwargs
-    )
+    fig = df.plot(kind="bar", stacked=True, width=1, ax=ax, legend=legend, **kwargs)
     if legend:
         ax.legend(loc="upper right")
     ax = fig.axes

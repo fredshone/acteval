@@ -142,4 +142,6 @@ def test_participation_pairs():
         "home+home": (array([0, 1]), array([1, 1])),
         "work+work": (array([0, 1]), array([2, 0])),
     }
-    assert equals(participation.joint_participation_prob(Population(population)), expected)
+    assert equals(
+        participation.joint_participation_prob(Population(population)), expected
+    )

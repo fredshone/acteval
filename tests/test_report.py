@@ -1,9 +1,9 @@
 from numpy import array
 from pandas import DataFrame, Series
 
+from acteval.density.features.times import start_times_by_act
 from acteval.distance.scalar import mae
 from acteval.evaluate import evaluate, extract_default, score_features
-from acteval.density.features.times import start_times_by_act
 from acteval.population import Population
 
 
@@ -52,9 +52,7 @@ def test_score_features():
     expected = Series({"home": 0.0, "work": 0.0}, name="test").sort_index()
     x = start_times_by_act(Population(observed))
     y = start_times_by_act(Population(y))
-    result = score_features(
-        "test", x, y, mae, (array([0]), array([1]))
-    ).sort_index()
+    result = score_features("test", x, y, mae, (array([0]), array([1]))).sort_index()
     assert result.equals(expected)
 
 
@@ -78,9 +76,7 @@ def test_score_features_with_default():
     expected = Series({"home": 0.0, "work": 1.0}, name="test").sort_index()
     x = start_times_by_act(Population(observed))
     y = start_times_by_act(Population(y))
-    result = score_features(
-        "test", x, y, mae, (array([0]), array([1]))
-    ).sort_index()
+    result = score_features("test", x, y, mae, (array([0]), array([1]))).sort_index()
     assert result.equals(expected)
 
 

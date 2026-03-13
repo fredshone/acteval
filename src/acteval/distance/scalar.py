@@ -1,9 +1,7 @@
 import numpy as np
 
 
-def mape(
-    a: tuple[np.ndarray, np.ndarray], b: tuple[np.ndarray, np.ndarray]
-) -> float:
+def mape(a: tuple[np.ndarray, np.ndarray], b: tuple[np.ndarray, np.ndarray]) -> float:
     """Calculate mean average percentage error between distributions a and b.
 
     Clipped at 1.0.
@@ -40,9 +38,7 @@ def mape_scalar(a, b):
     return np.abs((a - b) / a).mean()
 
 
-def mse(
-    a: tuple[np.ndarray, np.ndarray], b: tuple[np.ndarray, np.ndarray]
-) -> float:
+def mse(a: tuple[np.ndarray, np.ndarray], b: tuple[np.ndarray, np.ndarray]) -> float:
     # requires and b have same support.
     # unpack
     _, aw = a
@@ -50,9 +46,7 @@ def mse(
     return ((aw - bw) ** 2).mean()
 
 
-def mae(
-    a: tuple[np.ndarray, np.ndarray], b: tuple[np.ndarray, np.ndarray]
-) -> float:
+def mae(a: tuple[np.ndarray, np.ndarray], b: tuple[np.ndarray, np.ndarray]) -> float:
     # TODO test this
     # requires and b have same support.
     # unpack

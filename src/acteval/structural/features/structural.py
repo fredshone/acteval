@@ -72,9 +72,7 @@ def feasibility_eval(population: Population, name: str) -> tuple[Series, Series]
         name=name,
         dtype=float,
     )
-    weights = Series(
-        [n] * len(index), index=index, name=f"{name}__weight", dtype=int
-    )
+    weights = Series([n] * len(index), index=index, name=f"{name}__weight", dtype=int)
     return weights, metrics
 
 
@@ -121,7 +119,6 @@ def get_consecutives(population: DataFrame, act: str) -> Series:
 def start_and_end_acts(
     population: Population, target: str = "home"
 ) -> dict[str, tuple[ndarray, ndarray]]:
-    pids = population.pids
     acts = population.acts
     n = population.n
     first = int((acts[population.first_idx] == target).sum())

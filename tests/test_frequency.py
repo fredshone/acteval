@@ -21,9 +21,7 @@ def test_activity_count_bins():
         ]
     )
     class_map = {"home": 0, "work": 1}
-    binned = binned_activity_count(
-        population, class_map=class_map, duration=3, step=1
-    )
+    binned = binned_activity_count(population, class_map=class_map, duration=3, step=1)
     expected = array([[2, 0], [0, 2], [1, 1]])
     assert array_equal(binned, expected)
 

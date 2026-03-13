@@ -123,7 +123,7 @@ def _build_ngrams_per_pid(
 
     valid_mask = np.ones(len(codes), dtype=bool)
     if n > 1:
-        valid_mask[-(n - 1):] = False
+        valid_mask[-(n - 1) :] = False
     pid_boundaries = population.pid_boundaries
     if len(pid_boundaries) > 0:
         for offset in range(-(n - 1), 0):

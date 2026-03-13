@@ -6,15 +6,10 @@ Verifies:
 - ``Evaluator.compare_splits`` produces identical output to old ``subsample_and_evaluate``
 """
 
-from functools import partial
-
 import numpy as np
-from numpy import ndarray
 from pandas import DataFrame
 
 from acteval.density.features import participation, times, transitions
-from acteval.density.features.pid_features import PidFeatures
-from acteval.density.features.utils import equals
 from acteval.evaluate import Evaluator, compare_splits
 from acteval.population import Population
 from acteval.structural.features import structural
@@ -39,12 +34,18 @@ def _pop():
 
 def _assert_features_equal(a, b, label=""):
     """Assert two feature dicts are equal, with a helpful error message."""
-    assert set(a.keys()) == set(b.keys()), f"{label}: keys differ: {set(a.keys())} != {set(b.keys())}"
+    assert set(a.keys()) == set(
+        b.keys()
+    ), f"{label}: keys differ: {set(a.keys())} != {set(b.keys())}"
     for k in a:
         av, aw = a[k]
         bv, bw = b[k]
-        np.testing.assert_array_equal(av, bv, err_msg=f"{label}: values differ for key '{k}'")
-        np.testing.assert_array_equal(aw, bw, err_msg=f"{label}: weights differ for key '{k}'")
+        np.testing.assert_array_equal(
+            av, bv, err_msg=f"{label}: values differ for key '{k}'"
+        )
+        np.testing.assert_array_equal(
+            aw, bw, err_msg=f"{label}: weights differ for key '{k}'"
+        )
 
 
 def _assert_features_subset_equal(expected, actual, label=""):
@@ -58,8 +59,12 @@ def _assert_features_subset_equal(expected, actual, label=""):
         assert k in actual, f"{label}: key '{k}' missing from actual"
         ev, ew = expected[k]
         av, aw = actual[k]
-        np.testing.assert_array_equal(av, ev, err_msg=f"{label}: values differ for key '{k}'")
-        np.testing.assert_array_equal(aw, ew, err_msg=f"{label}: weights differ for key '{k}'")
+        np.testing.assert_array_equal(
+            av, ev, err_msg=f"{label}: values differ for key '{k}'"
+        )
+        np.testing.assert_array_equal(
+            aw, ew, err_msg=f"{label}: weights differ for key '{k}'"
+        )
 
 
 # ---------------------------------------------------------------------------

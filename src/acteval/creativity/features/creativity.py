@@ -75,9 +75,7 @@ def novelty(observed_hashed: set[str], synthetic_hashed: set[str]) -> float:
     return len(synthetic_hashed - observed_hashed) / n
 
 
-def conservatism(
-    observed_hashed: set[str], synthetic_hashed: set[str]
-) -> float:
+def conservatism(observed_hashed: set[str], synthetic_hashed: set[str]) -> float:
     """Measure the conservatism of a population as 1-novelty.
 
     Args:

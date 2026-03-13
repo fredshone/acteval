@@ -1,7 +1,6 @@
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 from pathlib import Path
 from typing import Callable
 
@@ -9,18 +8,9 @@ import numpy as np
 from pandas import DataFrame, MultiIndex, Series, concat
 
 from acteval.creativity.features import creativity
-from acteval.density.features import participation, times, transitions
 from acteval.density.features.pid_features import PidFeatures
-from acteval.distance import emd
 from acteval.filters import filter_novel
 from acteval.jobs import get_jobs
-from acteval.ops import (
-    average,
-    average2d,
-    average_density,
-    feature_value,
-    feature_weight,
-)
 from acteval.population import Population
 from acteval.structural.features import structural
 
@@ -57,9 +47,17 @@ def _summarize(
 
     if feature_grouper is not None:
         # Feature tier
-        feat_desc = descriptions.drop("unit", axis=1).groupby(feature_grouper).apply(weighted_av)
+        feat_desc = (
+            descriptions.drop("unit", axis=1)
+            .groupby(feature_grouper)
+            .apply(weighted_av)
+        )
         feat_desc["unit"] = descriptions["unit"].groupby(feature_grouper).first()
-        feat_dist = distances.drop("unit", axis=1).groupby(feature_grouper).apply(distance_weighted_av)
+        feat_dist = (
+            distances.drop("unit", axis=1)
+            .groupby(feature_grouper)
+            .apply(distance_weighted_av)
+        )
         feat_dist["unit"] = descriptions["unit"].groupby(feature_grouper).first()
         frames[f"{prefix}descriptions"] = feat_desc
         frames[f"{prefix}distances"] = feat_dist
@@ -227,9 +225,7 @@ def process_metrics(
     return descriptions, distances
 
 
-def describe(
-    descriptions: DataFrame, distances: DataFrame
-) -> dict[str, DataFrame]:
+def describe(descriptions: DataFrame, distances: DataFrame) -> dict[str, DataFrame]:
     return _summarize(
         descriptions,
         distances,
@@ -276,7 +272,10 @@ def eval_creativity(
         desc_cols[f"{model}__weight"] = [y_count, y_count]
         desc_cols[model] = [y_diversity, creativity.novelty(observed_hash, y_hash)]
         dist_cols[f"{model}__weight"] = [y_count, y_count]
-        dist_cols[model] = [1 - y_diversity, creativity.conservatism(observed_hash, y_hash)]
+        dist_cols[model] = [
+            1 - y_diversity,
+            creativity.conservatism(observed_hash, y_hash),
+        ]
 
     desc_cols["unit"] = ["prob. unique", "prob. novel"]
     dist_cols["unit"] = ["prob. not unique", "prob. conservative"]
@@ -346,9 +345,7 @@ def eval_jobs(
     )
 
     # sort by count and description
-    base = base.sort_values(
-        ascending=False, by=["observed__weight", "observed"]
-    )
+    base = base.sort_values(ascending=False, by=["observed__weight", "observed"])
 
     # collect parts in lists, concat once after the loop (avoids O(M²) concat)
     desc_parts = [base]
@@ -454,7 +451,9 @@ def report(
     suffix: str = "",
     ranking: bool = False,
 ):
-    _report_impl(frames, "", ["domain", "feature"], log_dir, head, verbose, suffix, ranking)
+    _report_impl(
+        frames, "", ["domain", "feature"], log_dir, head, verbose, suffix, ranking
+    )
 
 
 def report_splits(
@@ -465,7 +464,16 @@ def report_splits(
     suffix: str = "",
     ranking: bool = False,
 ):
-    _report_impl(frames, "label_", ["domain", "feature", "label"], log_dir, head, verbose, suffix, ranking)
+    _report_impl(
+        frames,
+        "label_",
+        ["domain", "feature", "label"],
+        log_dir,
+        head,
+        verbose,
+        suffix,
+        ranking,
+    )
 
 
 def add_stats(data: DataFrame, columns: dict[str, DataFrame]):
@@ -546,9 +554,7 @@ def extract_default(features: dict[str, tuple[np.array, np.array]]):
     return (default_support, np.array([1]))
 
 
-def extract_default_shape(
-    features: dict[str, tuple[np.array, np.array]]
-) -> np.array:
+def extract_default_shape(features: dict[str, tuple[np.array, np.array]]) -> np.array:
     for k, _ in iter(features.values()):
         if len(k) > 0:
             default_shape = list(k.shape)
@@ -613,7 +619,9 @@ class Evaluator:
         self._precompute()
 
     def _precompute(self) -> None:
-        for domain, feature, size, desc_job, dist_job in _all_feature_jobs(self._config_path):
+        for domain, feature, size, desc_job, dist_job in _all_feature_jobs(
+            self._config_path
+        ):
             feature_name = feature[0]
             feature_fn = feature[1]
             per_pid_fn = feature[2] if len(feature) > 2 else None
@@ -697,9 +705,7 @@ class Evaluator:
                     dtype=np.int64,
                 )
 
-                sub_target = self._target[
-                    self._target.pid.isin(target_orig_pids)
-                ]
+                sub_target = self._target[self._target.pid.isin(target_orig_pids)]
 
                 # --- synthetic subsets ---
                 sub_schedules: dict[str, DataFrame] = {}

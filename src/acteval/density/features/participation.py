@@ -1,10 +1,8 @@
 import numpy as np
 from numpy import array, ndarray
-from pandas import DataFrame
 
 from acteval.density.features.pid_features import PidFeatures
 from acteval.density.features.utils import (
-    _collect_by_group,
     _count_matrix,
     weighted_features,
 )
@@ -50,18 +48,14 @@ def participation_rates_by_seq_act(
     population: Population,
 ) -> dict[str, tuple[ndarray, ndarray]]:
     matrix, _, unique_keys = _count_matrix(population.pids, population.seq_key)
-    return weighted_features(
-        {k: matrix[:, j] for j, k in enumerate(unique_keys)}
-    )
+    return weighted_features({k: matrix[:, j] for j, k in enumerate(unique_keys)})
 
 
 def participation_rates_by_act_enum(
     population: Population,
 ) -> dict[str, tuple[ndarray, ndarray]]:
     matrix, _, unique_keys = _count_matrix(population.pids, population.act_enum_key)
-    return weighted_features(
-        {k: matrix[:, j] for j, k in enumerate(unique_keys)}
-    )
+    return weighted_features({k: matrix[:, j] for j, k in enumerate(unique_keys)})
 
 
 def calc_pair_prob(act_counts, pair):
@@ -75,11 +69,7 @@ def calc_pair_rate(act_counts, pair):
     a, b = pair
     if a == b:
         return ((act_counts[a] / 2).astype(int)).value_counts().to_dict()
-    return (
-        ((act_counts[[a, b]].min(axis=1) / 2).astype(int))
-        .value_counts()
-        .to_dict()
-    )
+    return ((act_counts[[a, b]].min(axis=1) / 2).astype(int)).value_counts().to_dict()
 
 
 def combinations_with_replacement(
@@ -102,9 +92,7 @@ def combinations_with_replacement(
     for i, val in enumerate(targets):
         prev_array_extended = prev_array.copy()
         prev_array_extended.append(val)
-        combs += combinations_with_replacement(
-            targets[i:], length, prev_array_extended
-        )
+        combs += combinations_with_replacement(targets[i:], length, prev_array_extended)
     return combs
 
 
@@ -179,10 +167,7 @@ def participation_rates_by_act_per_pid(
     """
     matrix = population.count_matrix
     pids = np.arange(population.n)
-    data = {
-        act: (matrix[:, j], pids)
-        for j, act in enumerate(population.unique_acts)
-    }
+    data = {act: (matrix[:, j], pids) for j, act in enumerate(population.unique_acts)}
     return PidFeatures(data=data, bin_size=None, factor=1)
 
 

@@ -2,6 +2,8 @@ from numpy import array
 from pandas import DataFrame, MultiIndex, Series, concat
 
 from acteval import evaluate
+from acteval.density.features.utils import equals
+from acteval.population import Population
 from acteval.structural.features.structural import (
     contains_consecutive,
     duration_consistency,
@@ -9,8 +11,6 @@ from acteval.structural.features.structural import (
     start_and_end_acts,
     time_consistency,
 )
-from acteval.density.features.utils import equals
-from acteval.population import Population
 
 
 def test_start_and_end_acts():
@@ -141,9 +141,7 @@ def test_describe_structural():
     metrics = Series(
         [2 / 3, 1 / 3, 0, 1 / 3, 1 / 3, 1 / 3, 0, 0], index=index, name="y"
     )
-    metrics = concat(
-        [observed_weights, observed_metrics, weights, metrics], axis=1
-    )
+    metrics = concat([observed_weights, observed_metrics, weights, metrics], axis=1)
     metrics["unit"] = "prob. invalid"
     frames = evaluate.describe(metrics, metrics)
     assert len(frames["descriptions"]) == 8
@@ -182,9 +180,7 @@ def test_describe_splits_structural():
     observed_metrics = Series([1 / 3] * 16, index=index, name="observed")
     weights = Series([3] * 16, index=index, name="y__weight")
     metrics = Series([1 / 3, 0] * 8, index=index, name="y")
-    metrics = concat(
-        [observed_weights, observed_metrics, weights, metrics], axis=1
-    )
+    metrics = concat([observed_weights, observed_metrics, weights, metrics], axis=1)
     metrics["unit"] = "prob. invalid"
     frames = evaluate.describe(metrics, metrics)
     print(frames["descriptions"])

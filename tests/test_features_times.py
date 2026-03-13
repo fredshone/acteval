@@ -34,9 +34,7 @@ def test_times_by_act():
         times.start_times_by_act(pop, bin_size=1, factor=1),
         expected_starts,
     )
-    assert equals(
-        times.end_times_by_act(pop, bin_size=1, factor=1), expected_ends
-    )
+    assert equals(times.end_times_by_act(pop, bin_size=1, factor=1), expected_ends)
     assert equals(
         times.durations_by_act(pop, bin_size=1, factor=1),
         expected_durations,

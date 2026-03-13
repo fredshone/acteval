@@ -135,19 +135,21 @@ def durations_by_act_plan_enum_per_pid(
 
 
 def start_and_duration_by_act_bins_per_pid(
-    population: Population, bin_size: int = 15, factor: int = 1440,
+    population: Population,
+    bin_size: int = 15,
+    factor: int = 1440,
 ) -> PidFeatures:
     if population.is_empty:
         return PidFeatures(data={}, bin_size=bin_size, factor=factor)
     pairs = np.column_stack([population.starts, population.durations])
-    features = _collect_by_group_with_pids(
-        population.acts, pairs, population.pids
-    )
+    features = _collect_by_group_with_pids(population.acts, pairs, population.pids)
     return PidFeatures(data=features, bin_size=bin_size, factor=factor)
 
 
 def joint_durations_by_act_bins_per_pid(
-    population: Population, bin_size: int = 15, factor: int = 1440,
+    population: Population,
+    bin_size: int = 15,
+    factor: int = 1440,
 ) -> PidFeatures:
     if population.is_empty:
         return PidFeatures(data={}, bin_size=bin_size, factor=factor)

@@ -36,79 +36,152 @@ def build_density_jobs(cfg: dict) -> list[tuple]:
 
     participation_rate_jobs = []
     if participations_cfg.get("lengths", True):
-        participation_rate_jobs.append((
-            ("lengths", structural.sequence_lengths, structural.sequence_lengths_per_pid),
-            (feature_weight),
-            ("length.", average),
-            ("EMD", emd),
-        ))
+        participation_rate_jobs.append(
+            (
+                (
+                    "lengths",
+                    structural.sequence_lengths,
+                    structural.sequence_lengths_per_pid,
+                ),
+                (feature_weight),
+                ("length.", average),
+                ("EMD", emd),
+            )
+        )
     if participations_cfg.get("rates", True):
-        participation_rate_jobs.append((
-            ("participation rate", participation.participation_rates_by_act, participation.participation_rates_by_act_per_pid),
-            (feature_weight),
-            ("av. rate", average),
-            ("EMD", emd),
-        ))
+        participation_rate_jobs.append(
+            (
+                (
+                    "participation rate",
+                    participation.participation_rates_by_act,
+                    participation.participation_rates_by_act_per_pid,
+                ),
+                (feature_weight),
+                ("av. rate", average),
+                ("EMD", emd),
+            )
+        )
     if participations_cfg.get("pair_rates", True):
-        participation_rate_jobs.append((
-            ("pair participation rate", participation.joint_participation_rate, participation.joint_participation_rate_per_pid),
-            (feature_weight),
-            ("av rate.", average),
-            ("EMD", emd),
-        ))
+        participation_rate_jobs.append(
+            (
+                (
+                    "pair participation rate",
+                    participation.joint_participation_rate,
+                    participation.joint_participation_rate_per_pid,
+                ),
+                (feature_weight),
+                ("av rate.", average),
+                ("EMD", emd),
+            )
+        )
 
     transition_jobs = []
     if transitions_cfg.get("2-gram", True):
-        transition_jobs.append((
-            ("2-gram", partial(transitions.transitions_by_act, min_count=ngram_min_count), partial(transitions.transitions_by_act_per_pid, min_count=ngram_min_count)),
-            (feature_weight),
-            ("av. rate", average),
-            ("EMD", emd),
-        ))
+        transition_jobs.append(
+            (
+                (
+                    "2-gram",
+                    partial(transitions.transitions_by_act, min_count=ngram_min_count),
+                    partial(
+                        transitions.transitions_by_act_per_pid,
+                        min_count=ngram_min_count,
+                    ),
+                ),
+                (feature_weight),
+                ("av. rate", average),
+                ("EMD", emd),
+            )
+        )
     if transitions_cfg.get("3-gram", True):
-        transition_jobs.append((
-            ("3-gram", partial(transitions.transition_3s_by_act, min_count=ngram_min_count), partial(transitions.transition_3s_by_act_per_pid, min_count=ngram_min_count)),
-            (feature_weight),
-            ("av. rate", average),
-            ("EMD", emd),
-        ))
+        transition_jobs.append(
+            (
+                (
+                    "3-gram",
+                    partial(
+                        transitions.transition_3s_by_act, min_count=ngram_min_count
+                    ),
+                    partial(
+                        transitions.transition_3s_by_act_per_pid,
+                        min_count=ngram_min_count,
+                    ),
+                ),
+                (feature_weight),
+                ("av. rate", average),
+                ("EMD", emd),
+            )
+        )
     if transitions_cfg.get("4-gram", True):
-        transition_jobs.append((
-            ("4-gram", partial(transitions.transition_4s_by_act, min_count=ngram_min_count), partial(transitions.transition_4s_by_act_per_pid, min_count=ngram_min_count)),
-            (feature_weight),
-            ("av. rate", average),
-            ("EMD", emd),
-        ))
+        transition_jobs.append(
+            (
+                (
+                    "4-gram",
+                    partial(
+                        transitions.transition_4s_by_act, min_count=ngram_min_count
+                    ),
+                    partial(
+                        transitions.transition_4s_by_act_per_pid,
+                        min_count=ngram_min_count,
+                    ),
+                ),
+                (feature_weight),
+                ("av. rate", average),
+                ("EMD", emd),
+            )
+        )
 
     time_jobs = []
     if timing_cfg.get("start_times", True):
-        time_jobs.append((
-            ("start times", times.start_times_by_act_plan_enum, times.start_times_by_act_plan_enum_per_pid),
-            (feature_weight),
-            ("average", average),
-            ("EMD", emd),
-        ))
+        time_jobs.append(
+            (
+                (
+                    "start times",
+                    times.start_times_by_act_plan_enum,
+                    times.start_times_by_act_plan_enum_per_pid,
+                ),
+                (feature_weight),
+                ("average", average),
+                ("EMD", emd),
+            )
+        )
     if timing_cfg.get("durations", True):
-        time_jobs.append((
-            ("durations", times.durations_by_act_plan_enum, times.durations_by_act_plan_enum_per_pid),
-            (feature_weight),
-            ("average", average),
-            ("EMD", emd),
-        ))
+        time_jobs.append(
+            (
+                (
+                    "durations",
+                    times.durations_by_act_plan_enum,
+                    times.durations_by_act_plan_enum_per_pid,
+                ),
+                (feature_weight),
+                ("average", average),
+                ("EMD", emd),
+            )
+        )
     if timing_cfg.get("start_durations", True):
-        time_jobs.append((
-            ("start-durations", times.start_and_duration_by_act_bins, times.start_and_duration_by_act_bins_per_pid),
-            (feature_weight),
-            ("average", average2d),
-            ("EMD", emd),
-        ))
+        time_jobs.append(
+            (
+                (
+                    "start-durations",
+                    times.start_and_duration_by_act_bins,
+                    times.start_and_duration_by_act_bins_per_pid,
+                ),
+                (feature_weight),
+                ("average", average2d),
+                ("EMD", emd),
+            )
+        )
     if timing_cfg.get("joint_durations", True):
-        time_jobs.append((
-            ("joint-durations", times.joint_durations_by_act_bins, times.joint_durations_by_act_bins_per_pid),
-            (feature_weight),
-            ("average", average2d),
-            ("EMD", emd),
-        ))
+        time_jobs.append(
+            (
+                (
+                    "joint-durations",
+                    times.joint_durations_by_act_bins,
+                    times.joint_durations_by_act_bins_per_pid,
+                ),
+                (feature_weight),
+                ("average", average2d),
+                ("EMD", emd),
+            )
+        )
 
     return [
         ("participations", participation_rate_jobs),

@@ -193,6 +193,5 @@ def weighted_features(
         dict[str, tuple[array, array[int]]]: A dictionary of features and weights.
     """
     return {
-        k: compress_feature(values, bin_size, factor)
-        for k, values in features.items()
+        k: compress_feature(values, bin_size, factor) for k, values in features.items()
     }

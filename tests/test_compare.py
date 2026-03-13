@@ -57,9 +57,7 @@ def test_compare_equals_evaluate():
     compare_result = compare(obs, {"m": syn}, report_stats=False)
     evaluate_result = evaluate({"m": syn}, obs, report_stats=False)
     for key in evaluate_result:
-        assert compare_result[key].equals(evaluate_result[key]), (
-            f"Mismatch in {key}"
-        )
+        assert compare_result[key].equals(evaluate_result[key]), f"Mismatch in {key}"
 
 
 def test_evaluator_caches():

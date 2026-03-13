@@ -206,7 +206,7 @@ def joint_time_distributions_plot(
         ax.tick_params(axis="x", which="both", length=0.0)
 
     handles = [
-        patches.Patch(color=c, label=l) for c, l in zip(legend_colours, legend)
+        patches.Patch(color=c, label=lab) for c, lab in zip(legend_colours, legend)
     ]
     fig.legend(
         handles=handles,

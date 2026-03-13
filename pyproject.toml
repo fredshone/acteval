@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [tool.uv]
-dev-dependencies = ["pytest", "pytest-cov"]
+dev-dependencies = ["pytest", "pytest-cov", "ruff", "black"]
 
 [build-system]
 requires = ["hatchling"]
@@ -25,3 +25,16 @@ packages = ["src/acteval"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/test_distance_emd.py" = ["E402"]
+
+[tool.black]
+target-version = ["py39"]

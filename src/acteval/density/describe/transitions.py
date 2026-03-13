@@ -77,9 +77,7 @@ def _probs_plot(
             lefts.append(i * width)
             cols.append(cmap[act])
 
-    ax.barh(
-        y=ys, width=widths, height=heights, left=lefts, color=cols, align="edge"
-    )
+    ax.barh(y=ys, width=widths, height=heights, left=lefts, color=cols, align="edge")
     ax.hlines(ys, xmin=0, xmax=1, color="white", linewidth=0.1)
 
     ax.spines["top"].set_visible(False)

@@ -25,9 +25,7 @@ def average_weight(features: dict[str, tuple[ndarray, ndarray]]) -> Series:
 
 def average_density(features: dict[str, tuple[ndarray, ndarray]]) -> Series:
     total = sum(w.sum() for _, w in features.values())
-    return Series(
-        {k: w.sum() / total for k, (v, w) in features.items()}, dtype=float
-    )
+    return Series({k: w.sum() / total for k, (v, w) in features.items()}, dtype=float)
 
 
 def average(features: dict[str, tuple[ndarray, ndarray]]) -> Series:

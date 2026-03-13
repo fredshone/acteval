@@ -14,6 +14,31 @@ Or with [uv](https://github.com/astral-sh/uv):
 uv add acteval
 ```
 
+## Development
+
+```bash
+# Install dependencies (including dev tools)
+uv sync
+
+# Run tests
+pytest tests/
+
+# Run tests with coverage
+pytest --cov=src/acteval tests/
+
+# Lint with ruff
+ruff check src/ tests/
+
+# Auto-fix lint issues
+ruff check --fix src/ tests/
+
+# Check formatting with black
+black --check src/ tests/
+
+# Auto-format
+black src/ tests/
+```
+
 ## Input format
 
 Data is passed as a pandas DataFrame with one row per activity episode:
