@@ -1,0 +1,24 @@
+[ngrams]
+min_count = 3
+
+[jobs.participations]
+lengths     = true
+rates       = true
+pair_rates  = true
+
+[jobs.transitions]
+"2-gram" = true
+"3-gram" = true
+"4-gram" = true
+
+[jobs.timing]
+start_times     = true
+durations       = true
+start_durations = true
+joint_durations = true
+
+[jobs.creativity]
+enabled = true
+
+[jobs.structural]
+enabled = true

@@ -1,0 +1,27 @@
+[project]
+name = "acteval"
+version = "0.1.0"
+description = "Standalone library for evaluating activity sequences"
+requires-python = ">=3.8"
+dependencies = [
+    "pandas",
+    "numpy",
+    "scipy<=1.13",
+    "pot",
+    "matplotlib",
+    "tabulate",
+    "tomli>=1.1.0; python_version < '3.11'",
+]
+
+[tool.uv]
+dev-dependencies = ["pytest", "pytest-cov"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/acteval"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
