@@ -7,10 +7,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-2019, windows-2022]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
@@ -25,9 +26,11 @@ jobs:
         run: uv sync
 
       - name: Lint
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
         run: uv run ruff check src/ tests/
 
       - name: Check formatting
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
         run: uv run black --check src/ tests/
 
       - name: Run tests
