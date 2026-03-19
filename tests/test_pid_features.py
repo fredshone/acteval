@@ -280,6 +280,26 @@ def test_evaluator_compare_splits():
     assert "label_group_distances" in result
 
 
+def test_compare_splits_two_models():
+    observed, synthetic, target_attrs, synth_attrs = _split_data()
+    synthetic2 = synthetic.copy()
+    result = compare_splits(
+        observed=observed,
+        synthetic_schedules={"m1": synthetic, "m2": synthetic2},
+        synthetic_attributes={"m1": synth_attrs, "m2": synth_attrs},
+        target_attributes=target_attrs,
+        split_on=["gender"],
+        report_stats=False,
+    )
+    assert "descriptions" in result
+    assert "label_group_distances" in result
+    # Both models should appear as columns
+    for frame in result.values():
+        cols = list(frame.columns)
+        assert any("m1" in c for c in cols), f"m1 missing from {cols}"
+        assert any("m2" in c for c in cols), f"m2 missing from {cols}"
+
+
 def test_unique_pids_original_stored():
     """Verify Population stores original pids."""
     df = DataFrame(

@@ -29,9 +29,11 @@ _REMOVE_GROUPS = [
 
 
 def _drop_features(df: DataFrame, features: list[tuple]) -> DataFrame:
-    for f in features:
-        df = df.drop(f, axis=0)
-    return df
+    sorted_df = df.sort_index()
+    to_drop = [f for f in features if f in sorted_df.index]
+    if not to_drop:
+        return df
+    return sorted_df.drop(to_drop, axis=0)
 
 
 def _summarize(
@@ -151,20 +153,20 @@ def process_metrics(
 ) -> tuple[DataFrame, DataFrame]:
     density_jobs, run_creativity, run_structural = get_jobs(config_path)
 
-    descriptions, distances = [], []
+    pairs: list[tuple[DataFrame, DataFrame]] = []
     timings = {}
 
     if run_creativity:
         if verbose:
             print(">>> Evaluating creativity")
         t0 = time.perf_counter()
-        creativity_descriptions, creativity_distances = eval_creativity(
-            synthetic_schedules=synthetic_schedules,
-            target_schedules=target_schedules,
+        pairs.append(
+            eval_creativity(
+                synthetic_schedules=synthetic_schedules,
+                target_schedules=target_schedules,
+            )
         )
         timings["creativity"] = time.perf_counter() - t0
-        descriptions.append(creativity_descriptions)
-        distances.append(creativity_distances)
 
     if run_structural:
         if verbose:
@@ -175,8 +177,7 @@ def process_metrics(
             target_schedules=target_schedules,
         )
         timings["sample_quality"] = time.perf_counter() - t0
-        descriptions.append(sample_quality)
-        distances.append(sample_quality)
+        pairs.append((sample_quality, sample_quality))
 
     if target_pop is None:
         target_pop = Population(target_schedules)
@@ -195,26 +196,22 @@ def process_metrics(
                 observed_features = cached_features.get((domain, feature_name))
             if observed_features is None:
                 observed_features = feature_fn(target_pop)
-            feature_descriptions, feature_distances = eval_jobs(
-                synthetic_schedules=synthetic_pops,
-                target_schedules=target_pop,
-                domain=domain,
-                feature=(feature_name, feature_fn),
-                size=size,
-                description_job=description_job,
-                distance_job=distance_job,
-                observed_features=observed_features,
+            pairs.append(
+                eval_jobs(
+                    synthetic_schedules=synthetic_pops,
+                    target_schedules=target_pop,
+                    domain=domain,
+                    feature=(feature_name, feature_fn),
+                    size=size,
+                    description_job=description_job,
+                    distance_job=distance_job,
+                    observed_features=observed_features,
+                )
             )
             timings[f"{domain}/{feature_name}"] = time.perf_counter() - t0
-            descriptions.append(feature_descriptions)
-            distances.append(feature_distances)
 
-    descriptions = concat(descriptions, axis=0)
-    distances = concat(distances, axis=0)
-
-    # remove nans
-    descriptions = descriptions.fillna(0.0)
-    distances = distances.fillna(0.0)
+    descriptions = concat([d.fillna(0.0) for d, _ in pairs if not d.empty], axis=0)
+    distances = concat([d.fillna(0.0) for _, d in pairs if not d.empty], axis=0)
 
     if verbose:
         print("\n--- Job timings ---")
@@ -347,26 +344,20 @@ def eval_jobs(
     # sort by count and description
     base = base.sort_values(ascending=False, by=["observed__weight", "observed"])
 
-    # collect parts in lists, concat once after the loop (avoids O(M²) concat)
-    desc_parts = [base]
-    dist_parts = [base]
+    # collect per-model results as tuples, concat once after the loop (avoids O(M²) concat)
+    model_results = []
     for model, y in synthetic_schedules.items():
         synth_features = feature_fn(y)
         synth_weight = size(synth_features)
         synth_weight.name = f"{model}__weight"
-        desc_parts.append(synth_weight)
-        desc_parts.append(describe_feature(model, synth_features, describe))
-        dist_parts.append(synth_weight)
-        dist_parts.append(
-            score_features(
-                model,
-                observed_features,
-                synth_features,
-                distance_metric,
-                default,
-            )
-        )
+        model_results.append((
+            synth_weight,
+            describe_feature(model, synth_features, describe),
+            score_features(model, observed_features, synth_features, distance_metric, default),
+        ))
 
+    desc_parts = [base] + [x for w, d, _ in model_results for x in (w, d)]
+    dist_parts = [base] + [x for w, _, s in model_results for x in (w, s)]
     feature_descriptions = concat(desc_parts, axis=1)
     feature_distances = concat(dist_parts, axis=1)
 
@@ -560,10 +551,6 @@ def extract_default_shape(features: dict[str, tuple[np.array, np.array]]) -> np.
             default_shape = list(k.shape)
             default_shape[0] = 1
             return default_shape
-    warnings.warn(
-        f"No features found in the given dictionary: {features}, return [1].",
-        stacklevel=2,
-    )
     return np.array([1])
 
 
@@ -690,8 +677,7 @@ class Evaluator:
 
         density_jobs, run_creativity, run_structural = get_jobs(self._config_path)
 
-        descriptions = []
-        distances = []
+        pairs: list[tuple[DataFrame, DataFrame]] = []
 
         for split in split_on:
             target_cats = target_attributes[split].unique()
@@ -726,23 +712,22 @@ class Evaluator:
                     cached_subset[key] = pid_feat.subset(target_dense_pids).aggregate()
 
                 # --- run process_metrics with cached subset ---
-                sub_reports = process_metrics(
+                desc, dist = process_metrics(
                     synthetic_schedules=sub_schedules,
                     target_schedules=sub_target,
                     verbose=verbose,
                     config_path=self._config_path,
                     cached_features=cached_subset,
                 )
-                for r in sub_reports:
-                    names = list(r.index.names) + ["label", "cat"]
+                for r in (desc, dist):
                     r.index = MultiIndex.from_tuples(
-                        [(*i, split, cat) for i in r.index], names=names
+                        [(*i, split, cat) for i in r.index],
+                        names=list(r.index.names) + ["label", "cat"],
                     )
-                descriptions.append(sub_reports[0])
-                distances.append(sub_reports[1])
+                pairs.append((desc, dist))
 
-        descriptions = concat(descriptions, axis=0)
-        distances = concat(distances, axis=0)
+        descriptions = concat([d for d, _ in pairs], axis=0)
+        distances = concat([d for _, d in pairs], axis=0)
 
         frames = describe(descriptions, distances)
         frames.update(describe_labels(descriptions, distances))
