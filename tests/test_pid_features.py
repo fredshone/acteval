@@ -310,3 +310,93 @@ def test_unique_pids_original_stored():
     )
     pop = Population(df)
     np.testing.assert_array_equal(pop.unique_pids_original, [10, 20])
+
+
+def test_compare_splits_precomputed_matches_original():
+    """Precomputed synthetic features must give numerically identical results."""
+    import pandas as pd
+    from pandas import MultiIndex, concat
+
+    from acteval.evaluate import (
+        _build_orig_to_dense,
+        _precompute_pid_features,
+        _subset_pid_features,
+        describe,
+        describe_labels,
+        process_metrics,
+    )
+
+    observed, synthetic, target_attrs, synth_attrs = _split_data()
+    evaluator = Evaluator(observed)
+
+    # Build precomputed synthetic structures
+    synthetic_pops = {"m": Population(synthetic)}
+    synth_orig_to_dense = _build_orig_to_dense(synthetic_pops)
+    synth_pid_features = _precompute_pid_features(synthetic_pops)
+    orig_to_dense = {
+        orig: dense
+        for dense, orig in enumerate(evaluator._target_pop.unique_pids_original)
+    }
+
+    pairs_cached = []
+    pairs_original = []
+
+    for cat in target_attrs["gender"].unique():
+        target_pids = target_attrs[target_attrs["gender"] == cat].pid.values
+        sub_target = observed[observed.pid.isin(target_pids)]
+        sample_pids = synth_attrs[synth_attrs["gender"] == cat].pid.values
+        sub_synth = {"m": synthetic[synthetic.pid.isin(sample_pids)]}
+
+        target_dense = np.array(
+            [orig_to_dense[p] for p in target_pids if p in orig_to_dense],
+            dtype=np.int64,
+        )
+        cached_target = {
+            k: pf.subset(target_dense).aggregate()
+            for k, pf in evaluator._target_pid_features.items()
+        }
+        synth_dense = {
+            "m": np.array(
+                [synth_orig_to_dense["m"][p] for p in sample_pids if p in synth_orig_to_dense["m"]],
+                dtype=np.int64,
+            )
+        }
+        synth_sub_acts = {"m": frozenset(sub_synth["m"]["act"].unique())}
+        cached_synth = _subset_pid_features(synth_pid_features, synth_dense, synth_sub_acts)
+
+        # Cached (optimised) path
+        desc, dist = process_metrics(
+            sub_synth, sub_target,
+            cached_features=cached_target,
+            cached_synthetic_features=cached_synth,
+        )
+        for r in (desc, dist):
+            r.index = MultiIndex.from_tuples(
+                [(*i, "gender", cat) for i in r.index],
+                names=list(r.index.names) + ["label", "cat"],
+            )
+        pairs_cached.append((desc, dist))
+
+        # Original (non-cached) path
+        desc2, dist2 = process_metrics(
+            sub_synth, sub_target,
+            cached_features=cached_target,
+        )
+        for r in (desc2, dist2):
+            r.index = MultiIndex.from_tuples(
+                [(*i, "gender", cat) for i in r.index],
+                names=list(r.index.names) + ["label", "cat"],
+            )
+        pairs_original.append((desc2, dist2))
+
+    descriptions_cached = concat([d for d, _ in pairs_cached])
+    distances_cached = concat([d for _, d in pairs_cached])
+    descriptions_orig = concat([d for d, _ in pairs_original])
+    distances_orig = concat([d for _, d in pairs_original])
+
+    pd.testing.assert_frame_equal(
+        descriptions_cached.sort_index(), descriptions_orig.sort_index()
+    )
+    pd.testing.assert_frame_equal(
+        distances_cached.sort_index(), distances_orig.sort_index()
+    )

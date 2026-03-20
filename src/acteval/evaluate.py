@@ -1,3 +1,4 @@
+import re
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
@@ -150,6 +151,7 @@ def process_metrics(
     target_pop: Population | None = None,
     synthetic_pops: dict[str, Population] | None = None,
     cached_features: dict[tuple, dict] | None = None,
+    cached_synthetic_features: dict[str, dict[tuple, dict]] | None = None,
 ) -> tuple[DataFrame, DataFrame]:
     density_jobs, run_creativity, run_structural = get_jobs(config_path)
 
@@ -196,6 +198,16 @@ def process_metrics(
                 observed_features = cached_features.get((domain, feature_name))
             if observed_features is None:
                 observed_features = feature_fn(target_pop)
+            synth_features_for_job = None
+            if cached_synthetic_features is not None:
+                key = (domain, feature_name)
+                synth_features_for_job = {
+                    model: feat_dict[key]
+                    for model, feat_dict in cached_synthetic_features.items()
+                    if key in feat_dict
+                }
+                if not synth_features_for_job:
+                    synth_features_for_job = None
             pairs.append(
                 eval_jobs(
                     synthetic_schedules=synthetic_pops,
@@ -206,6 +218,7 @@ def process_metrics(
                     description_job=description_job,
                     distance_job=distance_job,
                     observed_features=observed_features,
+                    synthetic_features=synth_features_for_job,
                 )
             )
             timings[f"{domain}/{feature_name}"] = time.perf_counter() - t0
@@ -320,6 +333,7 @@ def eval_jobs(
     description_job: tuple[str, Callable],
     distance_job: tuple[str, Callable],
     observed_features=None,
+    synthetic_features: dict[str, dict] | None = None,
 ) -> tuple[DataFrame, DataFrame]:
     # unpack tuples
     feature_name, feature_fn = feature
@@ -347,7 +361,11 @@ def eval_jobs(
     # collect per-model results as tuples, concat once after the loop (avoids O(M²) concat)
     model_results = []
     for model, y in synthetic_schedules.items():
-        synth_features = feature_fn(y)
+        synth_features = (
+            synthetic_features.get(model) if synthetic_features is not None else None
+        )
+        if synth_features is None:
+            synth_features = feature_fn(y)
         synth_weight = size(synth_features)
         synth_weight.name = f"{model}__weight"
         model_results.append((
@@ -594,6 +612,85 @@ def _all_feature_jobs(config_path=None):
             yield domain, feature, size, description_job, distance_job
 
 
+def _build_orig_to_dense(pops: dict[str, "Population"]) -> dict[str, dict]:
+    """Build {model: {orig_pid: dense_pid}} maps from each Population."""
+    return {
+        model: {orig: dense for dense, orig in enumerate(pop.unique_pids_original)}
+        for model, pop in pops.items()
+    }
+
+
+def _precompute_pid_features(
+    pops: dict[str, "Population"], config_path=None
+) -> dict[str, dict[tuple, "PidFeatures"]]:
+    """Compute PidFeatures once per population. Returns {model: {(domain, feat_name): PidFeatures}}."""
+    result: dict[str, dict[tuple, PidFeatures]] = {model: {} for model in pops}
+    for domain, feature, _, _, _ in _all_feature_jobs(config_path):
+        per_pid_fn = feature[2] if len(feature) > 2 else None
+        if per_pid_fn is None:
+            continue
+        key = (domain, feature[0])
+        for model, pop in pops.items():
+            result[model][key] = per_pid_fn(pop)
+    return result
+
+
+_TRAILING_DIGITS = re.compile(r"\d+$")
+
+
+def _key_activities(key: str) -> frozenset[str] | None:
+    """Return activity names referenced by a feature key, or None for non-activity keys.
+
+    Key formats:
+    - n-gram transitions: "act1>act2>act3" (split by ">")
+    - joint participation: "act1+act2" (split by "+")
+    - timing / single-act: "actN" or "act" (strip trailing digits)
+    - non-activity keys like "sequence lengths" contain spaces → return None
+    """
+    if ">" in key:
+        return frozenset(key.split(">"))
+    if "+" in key:
+        return frozenset(key.split("+"))
+    stripped = _TRAILING_DIGITS.sub("", key)
+    if not stripped or " " in stripped:
+        return None
+    return frozenset([stripped])
+
+
+def _subset_pid_features(
+    pid_features: dict[str, dict[tuple, "PidFeatures"]],
+    dense_pids: dict[str, np.ndarray],
+    subset_acts: dict[str, frozenset[str]] | None = None,
+) -> dict[str, dict[tuple, dict]]:
+    """Subset each model's PidFeatures to dense_pids and aggregate.
+
+    Empty entries and entries for activities absent from the subset are dropped
+    so the result matches what ``feature_fn(Population(sub_df))`` would return.
+
+    Args:
+        subset_acts: Optional ``{model: frozenset_of_activity_names}`` used to
+            filter out keys referencing activities not in the subset.
+    """
+    result: dict[str, dict[tuple, dict]] = {}
+    for model, model_features in pid_features.items():
+        acts = subset_acts[model] if subset_acts is not None else None
+        model_result: dict[tuple, dict] = {}
+        for key, pf in model_features.items():
+            aggregated = pf.subset(dense_pids[model]).aggregate()
+            filtered: dict = {}
+            for k, v in aggregated.items():
+                if len(v[0]) == 0:
+                    continue
+                if acts is not None:
+                    key_acts = _key_activities(k)
+                    if key_acts is not None and not key_acts.issubset(acts):
+                        continue
+                filtered[k] = v
+            model_result[key] = filtered
+        result[model] = model_result
+    return result
+
+
 class Evaluator:
     """Pre-computes target features once; compare multiple synthetic populations."""
 
@@ -675,6 +772,11 @@ class Evaluator:
             for dense, orig in enumerate(self._target_pop.unique_pids_original)
         }
 
+        # Precompute synthetic populations and their per-pid features once
+        synthetic_pops = {m: Population(y) for m, y in synthetic_schedules.items()}
+        synth_orig_to_dense = _build_orig_to_dense(synthetic_pops)
+        synth_pid_features = _precompute_pid_features(synthetic_pops, self._config_path)
+
         density_jobs, run_creativity, run_structural = get_jobs(self._config_path)
 
         pairs: list[tuple[DataFrame, DataFrame]] = []
@@ -695,8 +797,9 @@ class Evaluator:
 
                 # --- synthetic subsets ---
                 sub_schedules: dict[str, DataFrame] = {}
+                synth_dense_pids_for_cat: dict[str, np.ndarray] = {}
                 for model, attributes in synthetic_attributes.items():
-                    sample_pids = attributes[attributes[split] == cat].pid
+                    sample_pids = attributes[attributes[split] == cat].pid.values
                     if verbose:
                         print(
                             f">>> Subsampled {model} {split}={cat} with {len(sample_pids)}"
@@ -705,19 +808,33 @@ class Evaluator:
                     sub_schedules[model] = sample_schedules[
                         sample_schedules.pid.isin(sample_pids)
                     ]
+                    o2d = synth_orig_to_dense[model]
+                    synth_dense_pids_for_cat[model] = np.array(
+                        [o2d[p] for p in sample_pids if p in o2d], dtype=np.int64
+                    )
 
                 # --- build cached target features for this subset ---
                 cached_subset: dict[tuple, dict] = {}
                 for key, pid_feat in self._target_pid_features.items():
                     cached_subset[key] = pid_feat.subset(target_dense_pids).aggregate()
 
-                # --- run process_metrics with cached subset ---
+                # --- build cached synthetic features for this subset ---
+                synth_sub_acts = {
+                    model: frozenset(sub_schedules[model]["act"].unique())
+                    for model in sub_schedules
+                }
+                cached_synth = _subset_pid_features(
+                    synth_pid_features, synth_dense_pids_for_cat, synth_sub_acts
+                )
+
+                # --- run process_metrics with both cached target and synthetic ---
                 desc, dist = process_metrics(
                     synthetic_schedules=sub_schedules,
                     target_schedules=sub_target,
                     verbose=verbose,
                     config_path=self._config_path,
                     cached_features=cached_subset,
+                    cached_synthetic_features=cached_synth,
                 )
                 for r in (desc, dist):
                     r.index = MultiIndex.from_tuples(
