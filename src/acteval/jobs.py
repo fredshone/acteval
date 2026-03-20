@@ -9,7 +9,7 @@ else:
 
 from acteval.density.features import participation, times, transitions
 from acteval.distance import emd
-from acteval.ops import average, average2d, feature_weight
+from acteval.ops import average, average2d, feature_weight, time_average, time_average2d
 from acteval.structural.features import structural
 
 _DEFAULT_CONFIG = Path(__file__).parent / "config.toml"
@@ -139,7 +139,7 @@ def build_density_jobs(cfg: dict) -> list[tuple]:
                     times.start_times_by_act_plan_enum_per_pid,
                 ),
                 (feature_weight),
-                ("average", average),
+                ("average", time_average),
                 ("EMD", emd),
             )
         )
@@ -152,7 +152,7 @@ def build_density_jobs(cfg: dict) -> list[tuple]:
                     times.durations_by_act_plan_enum_per_pid,
                 ),
                 (feature_weight),
-                ("average", average),
+                ("average", time_average),
                 ("EMD", emd),
             )
         )
@@ -165,7 +165,7 @@ def build_density_jobs(cfg: dict) -> list[tuple]:
                     times.start_and_duration_by_act_bins_per_pid,
                 ),
                 (feature_weight),
-                ("average", average2d),
+                ("average", time_average2d),
                 ("EMD", emd),
             )
         )
@@ -178,7 +178,7 @@ def build_density_jobs(cfg: dict) -> list[tuple]:
                     times.joint_durations_by_act_bins_per_pid,
                 ),
                 (feature_weight),
-                ("average", average2d),
+                ("average", time_average2d),
                 ("EMD", emd),
             )
         )

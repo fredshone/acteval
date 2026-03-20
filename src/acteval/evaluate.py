@@ -12,6 +12,7 @@ from acteval.creativity.features import creativity
 from acteval.density.features.pid_features import PidFeatures
 from acteval.filters import filter_novel
 from acteval.jobs import get_jobs
+from acteval.ops import TIME_AVERAGE_OPS
 from acteval.population import Population
 from acteval.structural.features import structural
 
@@ -189,6 +190,8 @@ def process_metrics(
     for domain, jobs in density_jobs:
         for feature, size, description_job, distance_job in jobs:
             feature_name, feature_fn = feature[0], feature[1]
+            _, describe = description_job
+            missing_distance = 1.0 if describe in TIME_AVERAGE_OPS else None
             if verbose:
                 print(f">>> Evaluating {domain} {feature_name}")
             t0 = time.perf_counter()
@@ -219,12 +222,13 @@ def process_metrics(
                     distance_job=distance_job,
                     observed_features=observed_features,
                     synthetic_features=synth_features_for_job,
+                    missing_distance=missing_distance,
                 )
             )
             timings[f"{domain}/{feature_name}"] = time.perf_counter() - t0
 
-    descriptions = concat([d.fillna(0.0) for d, _ in pairs if not d.empty], axis=0)
-    distances = concat([d.fillna(0.0) for _, d in pairs if not d.empty], axis=0)
+    descriptions = concat([d for d, _ in pairs if not d.empty], axis=0)
+    distances = concat([d for _, d in pairs if not d.empty], axis=0)
 
     if verbose:
         print("\n--- Job timings ---")
@@ -334,6 +338,7 @@ def eval_jobs(
     distance_job: tuple[str, Callable],
     observed_features=None,
     synthetic_features: dict[str, dict] | None = None,
+    missing_distance=None,
 ) -> tuple[DataFrame, DataFrame]:
     # unpack tuples
     feature_name, feature_fn = feature
@@ -371,7 +376,7 @@ def eval_jobs(
         model_results.append((
             synth_weight,
             describe_feature(model, synth_features, describe),
-            score_features(model, observed_features, synth_features, distance_metric, default),
+            score_features(model, observed_features, synth_features, distance_metric, default, missing_distance),
         ))
 
     desc_parts = [base] + [x for w, d, _ in model_results for x in (w, d)]
@@ -513,32 +518,31 @@ def score_features(
     b: dict[str, tuple[np.array, np.array]],
     distance: Callable,
     default: tuple[np.array, np.array],
+    missing_distance=None,
 ):
     index = list(set(a.keys()) | set(b.keys()))
 
+    def _compute(k):
+        if missing_distance is not None and not (
+            _feature_present(a, k) and _feature_present(b, k)
+        ):
+            return missing_distance
+        return distance(defaulting_get(a, k, default), defaulting_get(b, k, default))
+
     if len(index) > _PARALLEL_THRESHOLD:
         # POT's C extensions release the GIL — threads give real parallelism
-        def _compute(k):
-            return distance(
-                defaulting_get(a, k, default), defaulting_get(b, k, default)
-            )
-
         with ThreadPoolExecutor() as executor:
             values = list(executor.map(_compute, index))
         metrics = Series(dict(zip(index, values)), name=model)
     else:
-        metrics = Series(
-            {
-                k: distance(
-                    defaulting_get(a, k, default),
-                    defaulting_get(b, k, default),
-                )
-                for k in index
-            },
-            name=model,
-        )
+        metrics = Series({k: _compute(k) for k in index}, name=model)
     metrics = metrics.fillna(0)
     return metrics
+
+
+def _feature_present(features, key):
+    f = features.get(key)
+    return f is not None and len(f[0]) > 0
 
 
 def defaulting_get(

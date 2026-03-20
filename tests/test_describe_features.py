@@ -1,3 +1,4 @@
+import numpy as np
 from numpy import array
 from pandas import Series
 from pandas.testing import assert_series_equal
@@ -54,3 +55,13 @@ def test_average2d():
     }
     expected = Series({"a": 1, "b": 1})
     assert_series_equal(ops.average2d(d), expected, check_dtype=False)
+
+
+def test_time_average_zero_weight():
+    result = ops.time_average({"act": (np.array([5.0]), np.array([0]))})
+    assert np.isnan(result["act"])
+
+
+def test_average_zero_weight():
+    result = ops.average({"act": (np.array([5.0]), np.array([0]))})
+    assert result["act"] == 0

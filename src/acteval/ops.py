@@ -47,3 +47,26 @@ def average2d(features: dict[str, tuple[ndarray, ndarray]]) -> Series:
         },
         dtype=float,
     )
+
+
+def time_average(features: dict[str, tuple[ndarray, ndarray]]) -> Series:
+    """Weighted average; returns NaN (not 0) for labels with no observations."""
+    weighted_average = {}
+    for k, (v, w) in features.items():
+        weighted_average[k] = np.average(v, axis=0, weights=w).sum() if w.sum() > 0 else np.nan
+    return Series(weighted_average, dtype=float)
+
+
+def time_average2d(features: dict[str, tuple[ndarray, ndarray]]) -> Series:
+    """2-D weighted average; omits zero-weight labels."""
+    return Series(
+        {
+            k: np.average(v, axis=0, weights=w).sum().sum()
+            for k, (v, w) in features.items()
+            if w.sum() > 0
+        },
+        dtype=float,
+    )
+
+
+TIME_AVERAGE_OPS = frozenset({time_average, time_average2d})
