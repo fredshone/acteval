@@ -2,6 +2,7 @@ from numpy import array
 from pandas import DataFrame, Series
 
 from acteval.density.features import transitions
+from acteval.density.features.transitions import ngrams_per_pid
 from acteval.density.features.utils import equals
 from acteval.population import Population
 
@@ -20,7 +21,7 @@ def test_transitions():
         "home>work": (array([1]), array([2])),
         "work>home": (array([0, 1]), array([1, 1])),
     }
-    result = transitions.transitions_by_act(Population(population))
+    result = ngrams_per_pid(Population(population), n=2).aggregate()
     assert equals(result, expected)
 
 
@@ -35,7 +36,7 @@ def test_transition_3s():
         ]
     )
     expected = {"home>work>home": (array([1]), array([1]))}
-    result = transitions.transition_3s_by_act(Population(population))
+    result = ngrams_per_pid(Population(population), n=3).aggregate()
     assert equals(result, expected)
 
 
@@ -52,7 +53,7 @@ def test_transition_4s():
         ]
     )
     expected = {"home>work>home>home": (array([1]), array([1]))}
-    result = transitions.transition_4s_by_act(Population(population))
+    result = ngrams_per_pid(Population(population), n=4).aggregate()
     assert equals(result, expected)
 
 

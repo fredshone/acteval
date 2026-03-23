@@ -186,13 +186,6 @@ def duration_consistency(
     return weighted_features({"total duration": dur_sums / factor})
 
 
-def sequence_lengths(
-    population: Population,
-) -> dict[str, tuple[ndarray, ndarray]]:
-    lengths, length_counts = np.unique(population.pid_counts, return_counts=True)
-    return {"sequence lengths": (lengths, length_counts)}
-
-
 def sequence_lengths_per_pid(
     population: Population,
 ) -> PidFeatures:

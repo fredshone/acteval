@@ -1,15 +1,15 @@
-"""Tests for PidFeatures and per-pid feature functions.
+"""Tests for PidFeatures and feature functions.
 
 Verifies:
-- ``fn_per_pid(pop).aggregate()`` equals ``fn(pop)`` for all per-pid functions
-- ``fn_per_pid(pop).subset(pids).aggregate()`` equals ``fn(Population(filtered_df))``
+- ``fn(pop).subset(pids).aggregate()`` equals ``fn(Population(filtered_df)).aggregate()``
 - ``Evaluator.compare_splits`` produces identical output to old ``subsample_and_evaluate``
 """
 
 import numpy as np
 from pandas import DataFrame
 
-from acteval.density.features import participation, times, transitions
+from acteval.density.features import participation, times
+from acteval.density.features.transitions import ngrams_per_pid
 from acteval.evaluate import Evaluator, compare_splits
 from acteval.population import Population
 from acteval.structural.features import structural
@@ -67,87 +67,6 @@ def _assert_features_subset_equal(expected, actual, label=""):
         )
 
 
-# ---------------------------------------------------------------------------
-# Round-trip: per_pid → aggregate must equal the standard function
-# ---------------------------------------------------------------------------
-
-
-def test_start_times_aggregate():
-    pop, _ = _pop()
-    expected = times.start_times_by_act_plan_enum(pop)
-    actual = times.start_times_by_act_plan_enum_per_pid(pop).aggregate()
-    _assert_features_equal(expected, actual, "start_times")
-
-
-def test_durations_aggregate():
-    pop, _ = _pop()
-    expected = times.durations_by_act_plan_enum(pop)
-    actual = times.durations_by_act_plan_enum_per_pid(pop).aggregate()
-    _assert_features_equal(expected, actual, "durations")
-
-
-def test_start_and_duration_aggregate():
-    pop, _ = _pop()
-    expected = times.start_and_duration_by_act_bins(pop)
-    actual = times.start_and_duration_by_act_bins_per_pid(pop).aggregate()
-    _assert_features_equal(expected, actual, "start_and_duration")
-
-
-def test_joint_durations_aggregate():
-    pop, _ = _pop()
-    expected = times.joint_durations_by_act_bins(pop)
-    actual = times.joint_durations_by_act_bins_per_pid(pop).aggregate()
-    _assert_features_equal(expected, actual, "joint_durations")
-
-
-def test_transitions_2gram_aggregate():
-    pop, _ = _pop()
-    expected = transitions.transitions_by_act(pop, min_count=0)
-    actual = transitions.transitions_by_act_per_pid(pop, min_count=0).aggregate()
-    _assert_features_equal(expected, actual, "2-gram")
-
-
-def test_transitions_3gram_aggregate():
-    pop, _ = _pop()
-    expected = transitions.transition_3s_by_act(pop, min_count=0)
-    actual = transitions.transition_3s_by_act_per_pid(pop, min_count=0).aggregate()
-    _assert_features_equal(expected, actual, "3-gram")
-
-
-def test_transitions_4gram_aggregate():
-    pop, _ = _pop()
-    expected = transitions.transition_4s_by_act(pop, min_count=0)
-    actual = transitions.transition_4s_by_act_per_pid(pop, min_count=0).aggregate()
-    _assert_features_equal(expected, actual, "4-gram")
-
-
-def test_transitions_with_min_count_aggregate():
-    pop, _ = _pop()
-    expected = transitions.transitions_by_act(pop, min_count=2)
-    actual = transitions.transitions_by_act_per_pid(pop, min_count=2).aggregate()
-    _assert_features_equal(expected, actual, "2-gram min_count=2")
-
-
-def test_participation_rates_aggregate():
-    pop, _ = _pop()
-    expected = participation.participation_rates_by_act(pop)
-    actual = participation.participation_rates_by_act_per_pid(pop).aggregate()
-    _assert_features_equal(expected, actual, "participation_rates")
-
-
-def test_joint_participation_aggregate():
-    pop, _ = _pop()
-    expected = participation.joint_participation_rate(pop)
-    actual = participation.joint_participation_rate_per_pid(pop).aggregate()
-    _assert_features_equal(expected, actual, "joint_participation")
-
-
-def test_sequence_lengths_aggregate():
-    pop, _ = _pop()
-    expected = structural.sequence_lengths(pop)
-    actual = structural.sequence_lengths_per_pid(pop).aggregate()
-    _assert_features_equal(expected, actual, "sequence_lengths")
-
 
 # ---------------------------------------------------------------------------
 # Subset: per_pid.subset(pids).aggregate() must equal fn(Population(filtered_df))
@@ -157,7 +76,7 @@ def test_sequence_lengths_aggregate():
 def test_start_times_subset():
     pop, df = _pop()
     sub_df = df[df.pid.isin([0, 2])]
-    expected = times.start_times_by_act_plan_enum(Population(sub_df))
+    expected = times.start_times_by_act_plan_enum_per_pid(Population(sub_df)).aggregate()
     pid_feat = times.start_times_by_act_plan_enum_per_pid(pop)
     actual = pid_feat.subset(np.array([0, 2])).aggregate()
     _assert_features_subset_equal(expected, actual, "start_times subset")
@@ -166,7 +85,7 @@ def test_start_times_subset():
 def test_durations_subset():
     pop, df = _pop()
     sub_df = df[df.pid.isin([1])]
-    expected = times.durations_by_act_plan_enum(Population(sub_df))
+    expected = times.durations_by_act_plan_enum_per_pid(Population(sub_df)).aggregate()
     pid_feat = times.durations_by_act_plan_enum_per_pid(pop)
     actual = pid_feat.subset(np.array([1])).aggregate()
     _assert_features_subset_equal(expected, actual, "durations subset")
@@ -175,7 +94,7 @@ def test_durations_subset():
 def test_participation_rates_subset():
     pop, df = _pop()
     sub_df = df[df.pid.isin([0, 1])]
-    expected = participation.participation_rates_by_act(Population(sub_df))
+    expected = participation.participation_rates_by_act_per_pid(Population(sub_df)).aggregate()
     pid_feat = participation.participation_rates_by_act_per_pid(pop)
     actual = pid_feat.subset(np.array([0, 1])).aggregate()
     _assert_features_subset_equal(expected, actual, "participation subset")
@@ -184,7 +103,7 @@ def test_participation_rates_subset():
 def test_sequence_lengths_subset():
     pop, df = _pop()
     sub_df = df[df.pid.isin([0, 2])]
-    expected = structural.sequence_lengths(Population(sub_df))
+    expected = structural.sequence_lengths_per_pid(Population(sub_df)).aggregate()
     pid_feat = structural.sequence_lengths_per_pid(pop)
     actual = pid_feat.subset(np.array([0, 2])).aggregate()
     _assert_features_subset_equal(expected, actual, "sequence_lengths subset")
@@ -194,8 +113,8 @@ def test_transitions_subset():
     pop, df = _pop()
     # Use min_count=0 so all n-grams are included
     sub_df = df[df.pid.isin([0, 1])]
-    expected = transitions.transitions_by_act(Population(sub_df), min_count=0)
-    pid_feat = transitions.transitions_by_act_per_pid(pop, min_count=0)
+    expected = ngrams_per_pid(Population(sub_df), n=2, min_count=0).aggregate()
+    pid_feat = ngrams_per_pid(pop, n=2, min_count=0)
     actual = pid_feat.subset(np.array([0, 1])).aggregate()
     _assert_features_subset_equal(expected, actual, "transitions subset")
 
@@ -318,7 +237,6 @@ def test_compare_splits_precomputed_matches_original():
     from pandas import MultiIndex, concat
 
     from acteval.evaluate import (
-        _build_orig_to_dense,
         _precompute_pid_features,
         _subset_pid_features,
         describe,
@@ -331,12 +249,7 @@ def test_compare_splits_precomputed_matches_original():
 
     # Build precomputed synthetic structures
     synthetic_pops = {"m": Population(synthetic)}
-    synth_orig_to_dense = _build_orig_to_dense(synthetic_pops)
     synth_pid_features = _precompute_pid_features(synthetic_pops)
-    orig_to_dense = {
-        orig: dense
-        for dense, orig in enumerate(evaluator._target_pop.unique_pids_original)
-    }
 
     pairs_cached = []
     pairs_original = []
@@ -347,19 +260,13 @@ def test_compare_splits_precomputed_matches_original():
         sample_pids = synth_attrs[synth_attrs["gender"] == cat].pid.values
         sub_synth = {"m": synthetic[synthetic.pid.isin(sample_pids)]}
 
-        target_dense = np.array(
-            [orig_to_dense[p] for p in target_pids if p in orig_to_dense],
-            dtype=np.int64,
-        )
+        target_dense = evaluator._target_pop.dense_pids_from_original(target_pids)
         cached_target = {
             k: pf.subset(target_dense).aggregate()
             for k, pf in evaluator._target_pid_features.items()
         }
         synth_dense = {
-            "m": np.array(
-                [synth_orig_to_dense["m"][p] for p in sample_pids if p in synth_orig_to_dense["m"]],
-                dtype=np.int64,
-            )
+            "m": synthetic_pops["m"].dense_pids_from_original(sample_pids)
         }
         synth_sub_acts = {"m": frozenset(sub_synth["m"]["act"].unique())}
         cached_synth = _subset_pid_features(synth_pid_features, synth_dense, synth_sub_acts)

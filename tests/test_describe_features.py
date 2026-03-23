@@ -6,21 +6,6 @@ from pandas.testing import assert_series_equal
 from acteval import ops
 
 
-def test_describe_actual():
-    d = {"a": 0, "b": 1}
-    expected = Series(d)
-    assert_series_equal(ops.actual(d), expected, check_dtype=False)
-
-
-def test_feature_length():
-    d = {
-        "a": (array([0, 1]), array([10, 10])),
-        "b": (array([0, 1, 2]), array([10, 5, 3])),
-    }
-    expected = Series({"a": 2, "b": 3})
-    assert_series_equal(ops.feature_length(d), expected, check_dtype=False)
-
-
 def test_feature_weight():
     d = {
         "a": (array([0, 1]), array([10, 10])),
@@ -28,15 +13,6 @@ def test_feature_weight():
     }
     expected = Series({"a": 20, "b": 18})
     assert_series_equal(ops.feature_weight(d), expected, check_dtype=False)
-
-
-def test_average_weight():
-    d = {
-        "a": (array([0, 1]), array([10, 10])),
-        "b": (array([0, 1, 2]), array([10, 5, 3])),
-    }
-    expected = Series({"a": 10, "b": 6})
-    assert_series_equal(ops.average_weight(d), expected, check_dtype=False)
 
 
 def test_average():

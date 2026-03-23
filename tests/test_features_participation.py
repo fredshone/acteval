@@ -54,7 +54,7 @@ def test_participation_rates_by_act():
         "work": (array([1]), array([2])),
     }
     assert equals(
-        participation.participation_rates_by_act(Population(population)), expected
+        participation.participation_rates_by_act_per_pid(Population(population)).aggregate(), expected
     )
 
 
@@ -97,20 +97,6 @@ def test_act_seq_participation_rates():
         participation.participation_rates_by_act_enum(Population(population)), expected
     )
 
-
-def test_combinations_with_replacement():
-    array = ["a", "b", "c"]
-    tuple_length = 2
-    expected = [
-        ["a", "a"],
-        ["a", "b"],
-        ["a", "c"],
-        ["b", "b"],
-        ["b", "c"],
-        ["c", "c"],
-    ]
-    result = participation.combinations_with_replacement(array, tuple_length)
-    assert result == expected
 
 
 def test_calc_pair_rate():

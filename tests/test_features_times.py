@@ -59,12 +59,12 @@ def test_start_and_duration_by_act_bins():
         ),
         "work": (array([[1.5, 7.5], [2.5, 4.5]]) / 1440, array([1, 1])),
     }
-    assert equals(times.start_and_duration_by_act_bins(pop, 1), expected)
+    assert equals(times.start_and_duration_by_act_bins_per_pid(pop, 1).aggregate(), expected)
     expected = {
         "home": (array([[2, 2], [6, 2]]) / 1440, array([2, 1])),
         "work": (array([[2, 6]]) / 1440, array([2])),
     }
-    assert equals(times.start_and_duration_by_act_bins(pop, 4), expected)
+    assert equals(times.start_and_duration_by_act_bins_per_pid(pop, 4).aggregate(), expected)
 
 
 def test_start_times_by_act_plan_seq():
@@ -100,7 +100,7 @@ def test_start_times_by_act_plan_enum():
         "work0": (array([1, 2]) / 1440, array([1, 1])),
         "home1": (array([6]) / 1440, array([1])),
     }
-    assert equals(times.start_times_by_act_plan_enum(Population(population)), expected)
+    assert equals(times.start_times_by_act_plan_enum_per_pid(Population(population)).aggregate(), expected)
 
 
 def test_end_times_by_act_plan_seq():
@@ -172,7 +172,7 @@ def test_durations_by_act_plan_enum():
         "work0": (array([1, 2]) / 1440, array([1, 1])),
         "home1": (array([6]) / 1440, array([1])),
     }
-    assert equals(times.durations_by_act_plan_enum(Population(population)), expected)
+    assert equals(times.durations_by_act_plan_enum_per_pid(Population(population)).aggregate(), expected)
 
 
 def test_joint_durations_by_act():
@@ -190,7 +190,7 @@ def test_joint_durations_by_act():
         "work": (array([[2.5, 6.5]]), array([1])),
     }
     assert equals(
-        times.joint_durations_by_act_bins(Population(population), bin_size=1, factor=1),
+        times.joint_durations_by_act_bins_per_pid(Population(population), bin_size=1, factor=1).aggregate(),
         expected,
     )
 
@@ -210,6 +210,6 @@ def test_joint_durations_by_act_binned():
         "work": (array([[2, 6]]), array([1])),
     }
     assert equals(
-        times.joint_durations_by_act_bins(Population(population), bin_size=4, factor=1),
+        times.joint_durations_by_act_bins_per_pid(Population(population), bin_size=4, factor=1).aggregate(),
         expected,
     )

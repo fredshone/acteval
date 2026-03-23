@@ -1,18 +1,34 @@
 import sys
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
+from typing import Callable
 
 if sys.version_info >= (3, 11):
     import tomllib
 else:
     import tomli as tomllib
 
-from acteval.density.features import participation, times, transitions
+from acteval.density.features import participation, times
+from acteval.density.features.transitions import ngrams_per_pid
 from acteval.distance import emd
-from acteval.ops import average, average2d, feature_weight, time_average, time_average2d
+from acteval.ops import average, average2d, feature_weight, time_average
 from acteval.structural.features import structural
 
 _DEFAULT_CONFIG = Path(__file__).parent / "config.toml"
+
+
+@dataclass(frozen=True)
+class JobSpec:
+    domain: str
+    name: str
+    feature_fn: Callable
+    size_fn: Callable
+    description_name: str
+    describe_fn: Callable
+    distance_name: str
+    distance_fn: Callable
+    missing_distance: float | None
 
 
 def load_config(path=None) -> dict:
@@ -22,171 +38,45 @@ def load_config(path=None) -> dict:
         return tomllib.load(f)
 
 
-def build_density_jobs(cfg: dict) -> list[tuple]:
+def build_density_jobs(cfg: dict) -> list[JobSpec]:
     """Returns active jobs for participations, transitions, and timing domains.
 
-    Each job is a 4-tuple of ``(feature, size, description_job, distance_job)``
-    where *feature* is a 3-tuple ``(name, fn, per_pid_fn | None)``.
-    The per-pid function, when present, returns a ``PidFeatures`` instance.
+    Returns a flat list of ``JobSpec`` instances. Timing jobs carry
+    ``missing_distance=1.0``; participation and transition jobs use ``None``.
     """
-    ngram_min_count = cfg.get("ngrams", {}).get("min_count", 3)
-    participations_cfg = cfg.get("jobs", {}).get("participations", {})
-    transitions_cfg = cfg.get("jobs", {}).get("transitions", {})
-    timing_cfg = cfg.get("jobs", {}).get("timing", {})
+    n = cfg.get("ngrams", {}).get("min_count", 3)
+    p = cfg.get("jobs", {}).get("participations", {})
+    t = cfg.get("jobs", {}).get("transitions", {})
+    ti = cfg.get("jobs", {}).get("timing", {})
 
-    participation_rate_jobs = []
-    if participations_cfg.get("lengths", True):
-        participation_rate_jobs.append(
-            (
-                (
-                    "lengths",
-                    structural.sequence_lengths,
-                    structural.sequence_lengths_per_pid,
-                ),
-                (feature_weight),
-                ("length.", average),
-                ("EMD", emd),
-            )
-        )
-    if participations_cfg.get("rates", True):
-        participation_rate_jobs.append(
-            (
-                (
-                    "participation rate",
-                    participation.participation_rates_by_act,
-                    participation.participation_rates_by_act_per_pid,
-                ),
-                (feature_weight),
-                ("av. rate", average),
-                ("EMD", emd),
-            )
-        )
-    if participations_cfg.get("pair_rates", True):
-        participation_rate_jobs.append(
-            (
-                (
-                    "pair participation rate",
-                    participation.joint_participation_rate,
-                    participation.joint_participation_rate_per_pid,
-                ),
-                (feature_weight),
-                ("av rate.", average),
-                ("EMD", emd),
-            )
-        )
-
-    transition_jobs = []
-    if transitions_cfg.get("2-gram", True):
-        transition_jobs.append(
-            (
-                (
-                    "2-gram",
-                    partial(transitions.transitions_by_act, min_count=ngram_min_count),
-                    partial(
-                        transitions.transitions_by_act_per_pid,
-                        min_count=ngram_min_count,
-                    ),
-                ),
-                (feature_weight),
-                ("av. rate", average),
-                ("EMD", emd),
-            )
-        )
-    if transitions_cfg.get("3-gram", True):
-        transition_jobs.append(
-            (
-                (
-                    "3-gram",
-                    partial(
-                        transitions.transition_3s_by_act, min_count=ngram_min_count
-                    ),
-                    partial(
-                        transitions.transition_3s_by_act_per_pid,
-                        min_count=ngram_min_count,
-                    ),
-                ),
-                (feature_weight),
-                ("av. rate", average),
-                ("EMD", emd),
-            )
-        )
-    if transitions_cfg.get("4-gram", True):
-        transition_jobs.append(
-            (
-                (
-                    "4-gram",
-                    partial(
-                        transitions.transition_4s_by_act, min_count=ngram_min_count
-                    ),
-                    partial(
-                        transitions.transition_4s_by_act_per_pid,
-                        min_count=ngram_min_count,
-                    ),
-                ),
-                (feature_weight),
-                ("av. rate", average),
-                ("EMD", emd),
-            )
-        )
-
-    time_jobs = []
-    if timing_cfg.get("start_times", True):
-        time_jobs.append(
-            (
-                (
-                    "start times",
-                    times.start_times_by_act_plan_enum,
-                    times.start_times_by_act_plan_enum_per_pid,
-                ),
-                (feature_weight),
-                ("average", time_average),
-                ("EMD", emd),
-            )
-        )
-    if timing_cfg.get("durations", True):
-        time_jobs.append(
-            (
-                (
-                    "durations",
-                    times.durations_by_act_plan_enum,
-                    times.durations_by_act_plan_enum_per_pid,
-                ),
-                (feature_weight),
-                ("average", time_average),
-                ("EMD", emd),
-            )
-        )
-    if timing_cfg.get("start_durations", True):
-        time_jobs.append(
-            (
-                (
-                    "start-durations",
-                    times.start_and_duration_by_act_bins,
-                    times.start_and_duration_by_act_bins_per_pid,
-                ),
-                (feature_weight),
-                ("average", time_average2d),
-                ("EMD", emd),
-            )
-        )
-    if timing_cfg.get("joint_durations", True):
-        time_jobs.append(
-            (
-                (
-                    "joint-durations",
-                    times.joint_durations_by_act_bins,
-                    times.joint_durations_by_act_bins_per_pid,
-                ),
-                (feature_weight),
-                ("average", time_average2d),
-                ("EMD", emd),
-            )
-        )
+    # (cfg_section, cfg_key, domain, name, feature_fn, description_name, describe_fn, missing_distance)
+    specs = [
+        (p,  "lengths",        "participations", "lengths",                structural.sequence_lengths_per_pid,                                       "length.",  average,      None),
+        (p,  "rates",          "participations", "participation rate",      participation.participation_rates_by_act_per_pid,                          "av. rate", average,      None),
+        (p,  "pair_rates",     "participations", "pair participation rate", participation.joint_participation_rate_per_pid,                            "av rate.", average,      None),
+        (t,  "2-gram",         "transitions",    "2-gram",                  partial(ngrams_per_pid, n=2, min_count=n),                                  "av. rate", average,      None),
+        (t,  "3-gram",         "transitions",    "3-gram",                  partial(ngrams_per_pid, n=3, min_count=n),                                  "av. rate", average,      None),
+        (t,  "4-gram",         "transitions",    "4-gram",                  partial(ngrams_per_pid, n=4, min_count=n),                                  "av. rate", average,      None),
+        (ti, "start_times",    "timing",         "start times",             times.start_times_by_act_plan_enum_per_pid,                                "average",  time_average, 1.0),
+        (ti, "durations",      "timing",         "durations",               times.durations_by_act_plan_enum_per_pid,                                  "average",  time_average, 1.0),
+        (ti, "start_durations","timing",         "start-durations",         times.start_and_duration_by_act_bins_per_pid,                              "average",  average2d,    1.0),
+        (ti, "joint_durations","timing",         "joint-durations",         times.joint_durations_by_act_bins_per_pid,                                 "average",  average2d,    1.0),
+    ]
 
     return [
-        ("participations", participation_rate_jobs),
-        ("transitions", transition_jobs),
-        ("timing", time_jobs),
+        JobSpec(
+            domain=domain,
+            name=name,
+            feature_fn=feature_fn,
+            size_fn=feature_weight,
+            description_name=description_name,
+            describe_fn=describe_fn,
+            distance_name="EMD",
+            distance_fn=emd,
+            missing_distance=missing_distance,
+        )
+        for cfg_section, cfg_key, domain, name, feature_fn, description_name, describe_fn, missing_distance in specs
+        if cfg_section.get(cfg_key, True)
     ]
 
 
@@ -200,12 +90,12 @@ def build_structural_jobs(cfg: dict) -> bool:
     return cfg.get("jobs", {}).get("structural", {}).get("enabled", True)
 
 
-def get_jobs(config_path=None):
+def get_jobs(config_path=None) -> tuple[list[JobSpec], bool, bool]:
     """Load config and return active job specification.
 
     Returns:
-        tuple of (density_domain_jobs, run_creativity, run_structural)
-        where density_domain_jobs is [(domain_name, [jobs])].
+        tuple of (density_jobs, run_creativity, run_structural)
+        where density_jobs is a flat list of JobSpec.
     """
     cfg = load_config(config_path)
     return (

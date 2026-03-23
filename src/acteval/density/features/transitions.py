@@ -7,101 +7,7 @@ from acteval.density.features.utils import weighted_features
 from acteval.population import Population
 
 
-def _build_ngrams(
-    population: Population, n: int, min_count: int = 0
-) -> dict[str, tuple[ndarray, ndarray]]:
-    """Build n-gram transition features from a Population.
-
-    Uses integer encoding to avoid string operations in the inner loop.
-    Activity codes are packed into a single integer per n-gram, then
-    converted back to string labels at the end.
-    """
-    codes = population.act_codes
-    pids = population.pids
-    base = population.n_act_types
-
-    # Build integer-encoded n-grams using vectorised arithmetic
-    # Each n-gram is encoded as code[0]*base^(n-1) + code[1]*base^(n-2) + ... + code[n-1]
-    powers = base ** np.arange(n - 1, -1, -1)
-    ngram_codes = np.zeros(len(codes), dtype=np.int64)
-    for i in range(n):
-        shifted = np.roll(codes, -i)
-        ngram_codes += shifted * powers[i]
-
-    # Identify valid positions (not crossing pid boundaries)
-    valid_mask = np.ones(len(codes), dtype=bool)
-    # Exclude trailing positions within last pid
-    if n > 1:
-        valid_mask[-(n - 1) :] = False
-    # Mark positions near pid boundaries
-    pid_boundaries = population.pid_boundaries
-    if len(pid_boundaries) > 0:
-        for offset in range(-(n - 1), 0):
-            positions = pid_boundaries + offset
-            positions = positions[(positions >= 0) & (positions < len(codes))]
-            valid_mask[positions] = False
-
-    valid_ngrams = ngram_codes[valid_mask]
-    valid_pids = pids[valid_mask]
-
-    # Early return if no valid n-grams
-    if len(valid_ngrams) == 0:
-        return {}
-
-    # Count n-grams per pid using numpy
-    unique_ngrams, ngram_indices = np.unique(valid_ngrams, return_inverse=True)
-    unique_pids, pid_indices = np.unique(valid_pids, return_inverse=True)
-
-    # Build count matrix (pids x ngrams)
-    count_matrix = np.zeros((len(unique_pids), len(unique_ngrams)), dtype=int)
-    np.add.at(count_matrix, (pid_indices, ngram_indices), 1)
-
-    # Filter rare n-grams
-    if min_count > 0:
-        col_totals = count_matrix.sum(axis=0)
-        keep = col_totals >= min_count
-        count_matrix = count_matrix[:, keep]
-        unique_ngrams = unique_ngrams[keep]
-
-    # Decode integer n-grams back to string labels
-    int_to_act = population.int_to_act
-
-    def _decode_ngram(code):
-        labels = []
-        for i in range(n):
-            labels.append(int_to_act[code // powers[i]])
-            code %= powers[i]
-        return ">".join(str(label) for label in labels)
-
-    # Build result dict with pid counts as lists (matching original format)
-    # todo: maybe don't need these by pid?
-    result = {}
-    for j, ng_code in enumerate(unique_ngrams):
-        label = _decode_ngram(ng_code)
-        result[label] = count_matrix[:, j].tolist()
-
-    return weighted_features(result)
-
-
-def transitions_by_act(
-    population: Population, min_count: int = 0
-) -> dict[str, tuple[ndarray, ndarray]]:
-    return _build_ngrams(population, 2, min_count=min_count)
-
-
-def transition_3s_by_act(
-    population: Population, min_count: int = 0
-) -> dict[str, tuple[ndarray, ndarray]]:
-    return _build_ngrams(population, 3, min_count=min_count)
-
-
-def transition_4s_by_act(
-    population: Population, min_count: int = 0
-) -> dict[str, tuple[ndarray, ndarray]]:
-    return _build_ngrams(population, 4, min_count=min_count)
-
-
-def _build_ngrams_per_pid(
+def ngrams_per_pid(
     population: Population, n: int, min_count: int = 0
 ) -> PidFeatures:
     """Build per-pid n-gram transition features returning PidFeatures.
@@ -167,23 +73,6 @@ def _build_ngrams_per_pid(
 
     return PidFeatures(data=result_data, bin_size=None, factor=1)
 
-
-def transitions_by_act_per_pid(
-    population: Population, min_count: int = 0
-) -> PidFeatures:
-    return _build_ngrams_per_pid(population, 2, min_count=min_count)
-
-
-def transition_3s_by_act_per_pid(
-    population: Population, min_count: int = 0
-) -> PidFeatures:
-    return _build_ngrams_per_pid(population, 3, min_count=min_count)
-
-
-def transition_4s_by_act_per_pid(
-    population: Population, min_count: int = 0
-) -> PidFeatures:
-    return _build_ngrams_per_pid(population, 4, min_count=min_count)
 
 
 def tour(acts: Series) -> str:

@@ -154,6 +154,17 @@ class Population:
             )
         return self._lazy_seq_key
 
+    def dense_pids_from_original(self, original_pids: ndarray) -> ndarray:
+        """Map an array of original pid values to dense integer indices.
+
+        Original pids not present in this population are silently dropped.
+        """
+        orig_to_dense = {orig: i for i, orig in enumerate(self.unique_pids_original)}
+        return np.array(
+            [orig_to_dense[p] for p in original_pids if p in orig_to_dense],
+            dtype=np.int64,
+        )
+
     @property
     def count_matrix(self) -> ndarray:
         """Activity count matrix, shape (n, n_act_types)."""

@@ -1,4 +1,5 @@
 import numpy as np
+from itertools import combinations_with_replacement
 from numpy import array, ndarray
 
 from acteval.density.features.pid_features import PidFeatures
@@ -35,15 +36,6 @@ def participation_rates(
     return weighted_features({"all": population.pid_counts})
 
 
-def participation_rates_by_act(
-    population: Population,
-) -> dict[str, tuple[ndarray, ndarray]]:
-    matrix = population.count_matrix
-    return weighted_features(
-        {act: matrix[:, j] for j, act in enumerate(population.unique_acts)}
-    )
-
-
 def participation_rates_by_seq_act(
     population: Population,
 ) -> dict[str, tuple[ndarray, ndarray]]:
@@ -72,29 +64,6 @@ def calc_pair_rate(act_counts, pair):
     return ((act_counts[[a, b]].min(axis=1) / 2).astype(int)).value_counts().to_dict()
 
 
-def combinations_with_replacement(
-    targets: list, length: int, prev_array=[]
-) -> list[list]:
-    """Returns all possible combinations of elements in the input array with replacement,
-    where each combination has a length of tuple_length.
-
-    Args:
-        targets (list): The input array to generate combinations from.
-        length (int): The length of each combination.
-        prev_array (list, optional): The previous array generated in the recursion. Defaults to [].
-
-    Returns:
-        list: A list of all possible combinations of elements in the input array with replacement.
-    """
-    if len(prev_array) == length:
-        return [prev_array]
-    combs = []
-    for i, val in enumerate(targets):
-        prev_array_extended = prev_array.copy()
-        prev_array_extended.append(val)
-        combs += combinations_with_replacement(targets[i:], length, prev_array_extended)
-    return combs
-
 
 def joint_participation_prob(
     population: Population,
@@ -122,39 +91,6 @@ def joint_participation_prob(
             p = int(((matrix[:, ai] > 0) & (matrix[:, bi] > 0)).sum())
         metric["+".join(pair)] = (array([0, 1]), array([n - p, p]))
     return metric
-
-
-def joint_participation_rate(
-    population: Population,
-) -> dict[str, tuple[ndarray, ndarray]]:
-    """Calculate the participation rate for all pairs of activities in the given population.
-
-    Args:
-        population (Population): A Population containing the population data.
-
-    Returns:
-        dict: A dictionary containing the participation rate for all pairs of activities.
-    """
-    matrix = population.count_matrix
-    unique_acts = population.unique_acts
-    act_list = list(unique_acts)
-    act_idx = {a: i for i, a in enumerate(act_list)}
-    pairs = combinations_with_replacement(act_list, 2)
-    metric = {}
-    for pair in pairs:
-        ai, bi = act_idx[pair[0]], act_idx[pair[1]]
-        if pair[0] == pair[1]:
-            vals = matrix[:, ai] // 2
-        else:
-            vals = np.minimum(matrix[:, ai], matrix[:, bi]) // 2
-        keys, counts = np.unique(vals, return_counts=True)
-        metric["+".join(pair)] = (keys, counts)
-    return metric
-
-
-# ---------------------------------------------------------------------------
-# Per-pid variants — return PidFeatures for efficient subsetting
-# ---------------------------------------------------------------------------
 
 
 def participation_rates_by_act_per_pid(
