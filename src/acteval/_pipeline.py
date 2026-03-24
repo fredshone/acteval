@@ -1,4 +1,41 @@
-import time
+"""Evaluation pipeline: orchestrates job execution and aggregates results.
+
+This module is the core evaluation engine. ``evaluate.py`` is a thin public API
+that builds ``Population`` objects and calls into here.
+
+## Entry points
+
+- ``describe()``: applies three-tier aggregation and returns the six output
+  DataFrames that ``compare()`` exposes.
+- ``describe_labels()``: same but keyed by label (used for split evaluation).
+
+## Three-tier aggregation
+
+Raw per-segment rows are collapsed upward in three steps:
+
+1. ``_aggregate_features``: raw rows → one row per ``(domain, feature, segment)``
+2. ``_aggregate_groups``: → one row per ``(domain, feature)``, dropping entries
+   in ``_REMOVE_FEATURES``
+3. ``_aggregate_domains``: → one row per ``domain``, dropping entries in
+   ``_REMOVE_GROUPS``
+
+``_REMOVE_FEATURES`` and ``_REMOVE_GROUPS`` are hardcoded lists; update them if
+feature or group names change.
+
+## Output DataFrame structure
+
+``descriptions`` and ``distances`` share the same MultiIndex
+``(domain, feature, segment)``. Columns are ``observed__weight``, ``observed``,
+then one column per model name plus a ``{model}__weight`` column for each.
+``unit`` is a string column carried alongside.
+
+## ``missing_distance``
+
+Each ``JobSpec`` carries a ``missing_distance`` value:
+- ``1.0`` (timing features): maximum-penalty distance when an activity is absent
+  from synthetic schedules.
+- ``None`` (participation, transitions): EMD is computed on whatever data exists.
+"""
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
@@ -7,8 +44,7 @@ import numpy as np
 from pandas import DataFrame, MultiIndex, Series, concat
 
 from acteval.creativity.features import creativity
-from acteval.filters import filter_novel
-from acteval.jobs import JobSpec, get_jobs
+from acteval.jobs import JobSpec
 from acteval.population import Population
 from acteval.structural.features import structural
 
@@ -32,13 +68,17 @@ _REMOVE_GROUPS = [
 
 def _drop_features(df: DataFrame, features: list[tuple]) -> DataFrame:
     sorted_df = df.sort_index()
-    to_drop = [f for f in features if f in sorted_df.index]
+    if not features:
+        return df
+    n = len(features[0])
+    feature_set = set(features)
+    to_drop = [idx for idx in sorted_df.index if idx[:n] in feature_set]
     if not to_drop:
         return df
     return sorted_df.drop(to_drop, axis=0)
 
 
-def weighted_av(report: DataFrame, suffix: str = "__weight") -> Series:
+def weighted_average(report: DataFrame, suffix: str = "__weight") -> Series:
     """Weighted average of dataframe using weights in the weight column."""
     cols = [c for c in report.columns if not c.endswith(suffix)]
     scores = DataFrame()
@@ -49,7 +89,7 @@ def weighted_av(report: DataFrame, suffix: str = "__weight") -> Series:
     return scores.sum()
 
 
-def distance_weighted_av(
+def distance_weighted_average(
     report: DataFrame,
     base_col: str = "observed__weight",
     suffix: str = "__weight",
@@ -79,39 +119,26 @@ def _aggregate_features(
 ) -> tuple[DataFrame, DataFrame]:
     """Tier 1: collapse per-segment rows into one row per (domain, feature, segment)."""
     grouper = ["domain", "feature", "segment"]
-    feat_desc = descriptions.drop("unit", axis=1).groupby(grouper).apply(weighted_av)
+    feat_desc = descriptions.drop("unit", axis=1).groupby(grouper).apply(weighted_average)
     feat_desc["unit"] = descriptions["unit"].groupby(grouper).first()
-    feat_dist = distances.drop("unit", axis=1).groupby(grouper).apply(distance_weighted_av)
+    feat_dist = distances.drop("unit", axis=1).groupby(grouper).apply(distance_weighted_average)
     feat_dist["unit"] = descriptions["unit"].groupby(grouper).first()
     return feat_desc, feat_dist
 
 
-def _aggregate_groups(
-    descriptions: DataFrame, distances: DataFrame, grouper: list[str]
-) -> tuple[DataFrame, DataFrame]:
-    """Tier 2: aggregate features into groups, dropping noisy sub-features."""
-    desc = _drop_features(descriptions.drop("unit", axis=1), _REMOVE_FEATURES)
-    group_desc = desc.groupby(grouper).apply(weighted_av)
-    group_desc["unit"] = descriptions["unit"].groupby(grouper).first()
-    dist = _drop_features(distances.drop("unit", axis=1), _REMOVE_FEATURES)
-    group_dist = dist.groupby(grouper).apply(distance_weighted_av)
-    group_dist["unit"] = descriptions["unit"].groupby(grouper).first()
-    return group_desc, group_dist
-
-
-def _aggregate_domains(
-    group_desc: DataFrame, group_dist: DataFrame, grouper: list[str]
-) -> tuple[DataFrame, DataFrame]:
-    """Tier 3: aggregate groups into domains, dropping non-representative groups."""
-    domain_desc = _drop_features(group_desc.drop("unit", axis=1), _REMOVE_GROUPS)
-    domain_dist = _drop_features(group_dist.drop("unit", axis=1), _REMOVE_GROUPS)
-    return domain_desc.groupby(grouper).mean(), domain_dist.groupby(grouper).mean()
-
-
 def describe(descriptions: DataFrame, distances: DataFrame) -> dict[str, DataFrame]:
+    from acteval.post_process import (
+        descriptions_to_domain_level,
+        descriptions_to_group_level,
+        distances_to_domain_level,
+        distances_to_group_level,
+    )
+
     feat_desc, feat_dist = _aggregate_features(descriptions, distances)
-    group_desc, group_dist = _aggregate_groups(descriptions, distances, ["domain", "feature"])
-    domain_desc, domain_dist = _aggregate_domains(group_desc, group_dist, ["domain"])
+    group_desc = descriptions_to_group_level(descriptions)
+    group_dist = distances_to_group_level(distances)
+    domain_desc = descriptions_to_domain_level(group_desc)
+    domain_dist = distances_to_domain_level(group_dist)
     return {
         "descriptions": feat_desc,
         "distances": feat_dist,
@@ -119,23 +146,6 @@ def describe(descriptions: DataFrame, distances: DataFrame) -> dict[str, DataFra
         "group_distances": group_dist,
         "domain_descriptions": domain_desc,
         "domain_distances": domain_dist,
-    }
-
-
-def describe_labels(
-    descriptions: DataFrame, distances: DataFrame
-) -> dict[str, DataFrame]:
-    group_desc, group_dist = _aggregate_groups(
-        descriptions, distances, ["domain", "feature", "label"]
-    )
-    domain_desc, domain_dist = _aggregate_domains(group_desc, group_dist, ["domain", "label"])
-    return {
-        "label_descriptions": descriptions,
-        "label_distances": distances,
-        "label_group_descriptions": group_desc,
-        "label_group_distances": group_dist,
-        "label_domain_descriptions": domain_desc,
-        "label_domain_distances": domain_dist,
     }
 
 _PARALLEL_THRESHOLD = 50
@@ -155,7 +165,7 @@ def _observed_base(
     observed} with a flat segment index sorted by weight descending.
     The MultiIndex is NOT set here; the caller sets it after stacking specs.
     """
-    default = extract_default(observed_features)
+    default = _make_default(observed_features)
     observed_weight = spec.size_fn(observed_features)
     observed_weight.name = "observed__weight"
     description_observed = spec.describe_fn(observed_features)
@@ -174,8 +184,8 @@ def _model_contribution(
     """Compute weight, description, and distance columns for one model × one spec."""
     synth_weight = spec.size_fn(synth_features)
     synth_weight.name = f"{model}__weight"
-    desc = describe_feature(model, synth_features, spec.describe_fn)
-    dist = score_features(
+    desc = _describe_feature(model, synth_features, spec.describe_fn)
+    dist = _score_features(
         model, obs_features, synth_features, spec.distance_fn, default, spec.missing_distance
     )
     return synth_weight, desc, dist
@@ -224,12 +234,23 @@ def _observed_base_creativity(
 
 
 def _model_cols_creativity(
-    model: str, y: DataFrame, observed_hash: object
+    model: str,
+    pid_hashes: dict,
+    sample_pids,
+    observed_hash: set,
 ) -> tuple[DataFrame, DataFrame]:
-    """Compute creativity columns for one model."""
-    y_hash = creativity.hash_population(y)
-    y_diversity = creativity.diversity(y, y_hash)
-    y_count = y.pid.nunique()
+    """Compute creativity columns for one model using pre-computed per-pid hashes.
+
+    Args:
+        model: Model name.
+        pid_hashes: ``{pid: hash_str}`` for the full synthetic population,
+            pre-computed once before the split loop.
+        sample_pids: Pid values for this (split, cat) subset.
+        observed_hash: Pre-cached hash set for this (split, cat) target subset.
+    """
+    y_hash = {pid_hashes[p] for p in sample_pids if p in pid_hashes}
+    y_count = len(sample_pids)
+    y_diversity = len(y_hash) / y_count if y_count > 0 else 0
     mi_desc = MultiIndex.from_tuples(
         [("creativity", "diversity", "all"), ("creativity", "novelty", "all")],
         names=["domain", "feature", "segment"],
@@ -271,137 +292,26 @@ def _observed_base_structural(target_schedules: DataFrame) -> DataFrame:
 
 
 def _model_cols_structural(
-    model: str, y: DataFrame, target_schedules: DataFrame
+    model: str,
+    per_pid_flags: dict,
+    novel_dense_pids,
 ) -> DataFrame:
-    """Compute structural columns for one model."""
-    y_df = filter_novel(y, target_schedules)
-    weights, metrics = structural.feasibility_eval(Population(y_df), name=model)
+    """Compute structural columns for one model using pre-computed per-pid flags.
+
+    Args:
+        model: Model name.
+        per_pid_flags: Output of ``structural.feasibility_per_pid`` for the full
+            synthetic population, pre-computed once before the split loop.
+        novel_dense_pids: Dense pid indices (0-based) of the novel persons in
+            this (split, cat) subset — i.e. synthetic persons whose sequence is
+            not already present in the corresponding target subset.
+    """
+    weights, metrics = structural.feasibility_aggregate(per_pid_flags, novel_dense_pids, model)
     return concat([weights, metrics], axis=1)
 
 
-# ---------------------------------------------------------------------------
-# process_metrics: populations → features
-# ---------------------------------------------------------------------------
 
-
-def process_metrics(
-    synthetic_schedules: dict[str, DataFrame],
-    target_schedules: DataFrame,
-    verbose: bool = False,
-    config_path=None,
-    target_pop: Population | None = None,
-    synthetic_pops: dict[str, Population] | None = None,
-    cached_features: dict[tuple, dict] | None = None,
-    cached_synthetic_features: dict[str, dict[tuple, dict]] | None = None,
-) -> tuple[DataFrame, DataFrame]:
-    density_jobs, run_creativity, run_structural = get_jobs(config_path)
-
-    if target_pop is None:
-        target_pop = Population(target_schedules)
-    if synthetic_pops is None:
-        synthetic_pops = {m: Population(y) for m, y in synthetic_schedules.items()}
-
-    # --- observed features for all density jobs (computed once) ---
-    obs_features: dict[tuple, dict] = {}
-    defaults: dict[tuple, tuple] = {}
-    for spec in density_jobs:
-        key = (spec.domain, spec.name)
-        obs_feat = (cached_features or {}).get(key) or spec.feature_fn(target_pop).aggregate()
-        obs_features[key] = obs_feat
-        defaults[key] = extract_default(obs_feat)
-
-    # --- observed base rows ---
-    base_desc_parts: list[DataFrame] = []
-    base_dist_parts: list[DataFrame] = []
-
-    observed_hash = None
-    if run_creativity:
-        bd, bi, observed_hash = _observed_base_creativity(target_schedules)
-        base_desc_parts.append(bd)
-        base_dist_parts.append(bi.drop("observed", axis=1))
-
-    if run_structural:
-        base_struct = _observed_base_structural(target_schedules)
-        base_desc_parts.append(base_struct)
-        base_dist_parts.append(base_struct.drop("observed", axis=1))
-
-    for spec in density_jobs:
-        key = (spec.domain, spec.name)
-        base, _ = _observed_base(spec, obs_features[key])
-        mi = MultiIndex.from_tuples(
-            [(spec.domain, spec.name, f) for f in base.index],
-            names=["domain", "feature", "segment"],
-        )
-        base.index = mi
-        base_desc_parts.append(base.assign(unit=spec.description_name))
-        base_dist_parts.append(base[["observed__weight"]].assign(unit=spec.distance_name))
-
-    base_desc = concat(base_desc_parts)
-    base_dist = concat(base_dist_parts)
-
-    # --- per-population columns (populations → features) ---
-    model_desc_cols: list[DataFrame] = []
-    model_dist_cols: list[DataFrame] = []
-    timings: dict[str, float] = {}
-
-    for model, pop in synthetic_pops.items():
-        if verbose:
-            print(f">>> Evaluating {model}")
-        t0 = time.perf_counter()
-
-        m_desc_parts: list[DataFrame] = []
-        m_dist_parts: list[DataFrame] = []
-
-        if run_creativity:
-            c_desc, c_dist = _model_cols_creativity(model, synthetic_schedules[model], observed_hash)
-            m_desc_parts.append(c_desc)
-            m_dist_parts.append(c_dist)
-
-        if run_structural:
-            s_cols = _model_cols_structural(model, synthetic_schedules[model], target_schedules)
-            m_desc_parts.append(s_cols)
-            m_dist_parts.append(s_cols)
-
-        for spec in density_jobs:
-            key = (spec.domain, spec.name)
-            synth_feat = None
-            if cached_synthetic_features:
-                model_cache = cached_synthetic_features.get(model)
-                if model_cache is not None and key in model_cache:
-                    synth_feat = model_cache[key]
-            if synth_feat is None:
-                synth_feat = spec.feature_fn(pop).aggregate()
-            w, d, s = _model_contribution(model, spec, obs_features[key], synth_feat, defaults[key])
-            desc_part = DataFrame({f"{model}__weight": w, model: d})
-            dist_part = DataFrame({f"{model}__weight": w, model: s})
-            desc_part.index = MultiIndex.from_tuples(
-                [(spec.domain, spec.name, f) for f in desc_part.index],
-                names=["domain", "feature", "segment"],
-            )
-            dist_part.index = MultiIndex.from_tuples(
-                [(spec.domain, spec.name, f) for f in dist_part.index],
-                names=["domain", "feature", "segment"],
-            )
-            m_desc_parts.append(desc_part)
-            m_dist_parts.append(dist_part)
-
-        model_desc_cols.append(concat(m_desc_parts))
-        model_dist_cols.append(concat(m_dist_parts))
-        timings[model] = time.perf_counter() - t0
-
-    if verbose:
-        print("\n--- Model timings ---")
-        for model_name, elapsed in sorted(timings.items(), key=lambda x: -x[1]):
-            print(f"  {model_name:40s} {elapsed:.3f}s")
-        print(f"  {'TOTAL':40s} {sum(timings.values()):.3f}s")
-
-    descriptions = concat([base_desc] + model_desc_cols, axis=1)
-    distances = concat([base_dist] + model_dist_cols, axis=1)
-
-    return descriptions, distances
-
-
-def describe_feature(
+def _describe_feature(
     model: str,
     features: dict[str, tuple[np.array, np.array]],
     describe: Callable,
@@ -411,7 +321,7 @@ def describe_feature(
     return feature_description
 
 
-def score_features(
+def _score_features(
     model: str,
     a: dict[str, tuple[np.array, np.array]],
     b: dict[str, tuple[np.array, np.array]],
@@ -426,7 +336,7 @@ def score_features(
             _feature_present(a, k) and _feature_present(b, k)
         ):
             return missing_distance
-        return distance(defaulting_get(a, k, default), defaulting_get(b, k, default))
+        return distance(_get_or_default(a, k, default), _get_or_default(b, k, default))
 
     if len(index) > _PARALLEL_THRESHOLD:
         with ThreadPoolExecutor() as executor:
@@ -443,7 +353,7 @@ def _feature_present(features, key):
     return f is not None and len(f[0]) > 0
 
 
-def defaulting_get(
+def _get_or_default(
     features: dict[str, tuple[np.array, np.array]],
     key: str,
     default: tuple[np.array, np.array],
@@ -457,13 +367,13 @@ def defaulting_get(
     return feature
 
 
-def extract_default(features: dict[str, tuple[np.array, np.array]]):
-    default_shape = extract_default_shape(features)
+def _make_default(features: dict[str, tuple[np.array, np.array]]):
+    default_shape = _infer_feature_shape(features)
     default_support = np.zeros(default_shape)
     return (default_support, np.array([1]))
 
 
-def extract_default_shape(features: dict[str, tuple[np.array, np.array]]) -> np.array:
+def _infer_feature_shape(features: dict[str, tuple[np.array, np.array]]) -> np.array:
     for values, _ in iter(features.values()):
         if len(values) > 0:
             default_shape = list(values.shape)
@@ -484,17 +394,9 @@ def evaluate(
         DeprecationWarning,
         stacklevel=2,
     )
-    descriptions, distances = process_metrics(
-        synthetic_schedules, target_schedules, verbose=verbose
-    )
-    frames = describe(descriptions, distances)
+    from acteval.evaluate import compare
 
-    if report_stats:
-        columns = list(synthetic_schedules.keys())
-        for frame in frames.values():
-            add_stats(data=frame, columns=columns)
-
-    return frames
+    return compare(target_schedules, synthetic_schedules, report_stats=report_stats)
 
 
 def subsample_and_evaluate(

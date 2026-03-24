@@ -14,6 +14,22 @@ def hash_schedule(schedule: DataFrame) -> list[str]:
     return "".join(act_hash)
 
 
+def hash_per_pid(population: DataFrame) -> dict:
+    """Hash each person's schedule, returning {pid: hash_str}.
+
+    Unlike ``hash_population``, duplicates are preserved so the result can be
+    subsetted by pid before collapsing to a set.
+
+    Args:
+        population (DataFrame): Input population of sequences.
+
+    Returns:
+        dict: Mapping of pid → hash string.
+    """
+    act_hash = population.act.astype(str) + population.duration.astype(str)
+    return act_hash.groupby(population.pid).apply("".join).to_dict()
+
+
 def hash_population(population: DataFrame) -> set[str]:
     """Hash a population of sequences. We first create strings of combined activities and durations.
     Then create a python set of these strings. This will remove duplicates.
@@ -24,8 +40,7 @@ def hash_population(population: DataFrame) -> set[str]:
     Returns:
         set[str]: set of hashed sequences.
     """
-    act_hash = population.act.astype(str) + population.duration.astype(str)
-    return set(act_hash.groupby(population.pid).apply("".join))
+    return set(hash_per_pid(population).values())
 
 
 def diversity(population: DataFrame, hashed: set[str]) -> float:

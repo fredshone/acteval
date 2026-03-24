@@ -1,7 +1,6 @@
-import numpy as np
 from pandas import DataFrame
 
-from acteval.evaluate import process_metrics
+from acteval.evaluate import compare
 
 
 def _observed():
@@ -24,7 +23,8 @@ def _synthetic():
 
 
 def test_timing_distance_for_absent_activity_is_one():
-    _, dists = process_metrics({"m": _synthetic()}, _observed())
+    result = compare(_observed(), {"m": _synthetic()}, report_stats=False)
+    dists = result["distances"]
     timing_dists = dists.xs("timing", level="domain")
     start_dists = timing_dists.xs("start times", level="feature")
     work_rows = start_dists[start_dists.index.str.startswith("work")]
@@ -32,17 +32,21 @@ def test_timing_distance_for_absent_activity_is_one():
     assert (work_rows["m"] == 1.0).all()
 
 
-def test_timing_description_for_absent_activity_is_nan():
-    descs, _ = process_metrics({"m": _synthetic()}, _observed())
+def test_timing_description_for_absent_activity_is_zero():
+    # After weighted aggregation, absent activities have zero weight so their
+    # description collapses to 0.0 (not NaN) in the aggregated output.
+    result = compare(_observed(), {"m": _synthetic()}, report_stats=False)
+    descs = result["descriptions"]
     timing_descs = descs.xs("timing", level="domain")
     start_descs = timing_descs.xs("start times", level="feature")
     work_rows = start_descs[start_descs.index.str.startswith("work")]
     assert len(work_rows) > 0, "Expected work* rows in start times"
-    assert work_rows["m"].isna().all()
+    assert (work_rows["m"] == 0.0).all()
 
 
 def test_participation_rate_distance_for_absent_activity_not_one():
-    _, dists = process_metrics({"m": _synthetic()}, _observed())
+    result = compare(_observed(), {"m": _synthetic()}, report_stats=False)
+    dists = result["distances"]
     part_dists = dists.xs("participations", level="domain")
     rate_dists = part_dists.xs("participation rate", level="feature")
     work_rows = rate_dists[rate_dists.index.str.startswith("work")]

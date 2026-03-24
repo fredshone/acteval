@@ -110,7 +110,6 @@ class SinkhornDistance:
 
     def forward(self, x, y):
         # The Sinkhorn algorithm takes as input three variables :
-        print("calc cost matrix")
         C = self._cost_matrix(x, y)  # Wasserstein cost function
         x_points = x.shape[-2]
         y_points = y.shape[-2]
@@ -120,13 +119,11 @@ class SinkhornDistance:
             batch_size = x.shape[0]
 
         # both marginals are fixed with equal weights
-        print("mu")
         mu = (
             torch.empty(batch_size, x_points, dtype=torch.float, requires_grad=False)
             .fill_(1.0 / x_points)
             .squeeze()
         )
-        print("nu")
         nu = (
             torch.empty(batch_size, y_points, dtype=torch.float, requires_grad=False)
             .fill_(1.0 / y_points)
@@ -143,7 +140,6 @@ class SinkhornDistance:
 
         # Sinkhorn iterations
         for i in range(self.max_iter):
-            print(i, "start")
             u1 = u  # useful to check the update
             u = (
                 self.eps
@@ -159,11 +155,9 @@ class SinkhornDistance:
                 + v
             )
             err = (u - u1).abs().sum(-1).mean()
-            print(i, err.item())
 
             actual_nits += 1
             if err.item() < thresh:
-                print(f"Sinkhorn converged at iteration {i}")
                 break
 
         U, V = u, v

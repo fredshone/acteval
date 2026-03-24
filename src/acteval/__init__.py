@@ -1,4 +1,7 @@
 from acteval.evaluate import (
+    EvalResult as EvalResult,
+)
+from acteval.evaluate import (
     Evaluator as Evaluator,
 )
 from acteval.evaluate import (

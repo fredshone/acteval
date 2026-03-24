@@ -8,22 +8,11 @@ from acteval.jobs import JobSpec, get_jobs
 _TRAILING_DIGITS = re.compile(r"\d+$")
 
 
-def _all_feature_jobs(config_path=None) -> list[JobSpec]:
+def _get_density_jobs(config_path=None) -> list[JobSpec]:
     """Return flat list of JobSpec for all active density jobs."""
     jobs, _, _ = get_jobs(config_path)
     return jobs
 
-
-def _precompute_pid_features(
-    pops: dict[str, "Population"], config_path=None
-) -> dict[str, dict[tuple, "PidFeatures"]]:
-    """Compute PidFeatures once per population. Returns {model: {(domain, feat_name): PidFeatures}}."""
-    result: dict[str, dict[tuple, PidFeatures]] = {model: {} for model in pops}
-    for spec in _all_feature_jobs(config_path):
-        key = (spec.domain, spec.name)
-        for model, pop in pops.items():
-            result[model][key] = spec.feature_fn(pop)
-    return result
 
 
 def _key_activities(key: str) -> frozenset[str] | None:

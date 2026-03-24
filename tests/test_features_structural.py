@@ -2,7 +2,14 @@ from numpy import array
 from pandas import DataFrame, MultiIndex, Series, concat
 
 from acteval import evaluate
+from acteval._pipeline import describe
 from acteval.density.features.utils import equals
+from acteval.post_process import (
+    descriptions_to_domain_level,
+    descriptions_to_group_level,
+    distances_to_domain_level,
+    distances_to_group_level,
+)
 from acteval.population import Population
 from acteval.structural.features.structural import (
     contains_consecutive,
@@ -143,7 +150,7 @@ def test_describe_structural():
     )
     metrics = concat([observed_weights, observed_metrics, weights, metrics], axis=1)
     metrics["unit"] = "prob. invalid"
-    frames = evaluate.describe(metrics, metrics)
+    frames = describe(metrics, metrics)
     assert len(frames["descriptions"]) == 8
     assert len(frames["group_descriptions"]) == 3
     assert len(frames["domain_descriptions"]) == 1
@@ -182,7 +189,7 @@ def test_describe_splits_structural():
     metrics = Series([1 / 3, 0] * 8, index=index, name="y")
     metrics = concat([observed_weights, observed_metrics, weights, metrics], axis=1)
     metrics["unit"] = "prob. invalid"
-    frames = evaluate.describe(metrics, metrics)
+    frames = describe(metrics, metrics)
     print(frames["descriptions"])
     assert len(frames["descriptions"]) == 8
     assert len(frames["group_descriptions"]) == 3
@@ -192,11 +199,14 @@ def test_describe_splits_structural():
     assert len(frames["group_distances"]) == 3
     assert len(frames["domain_distances"]) == 1
 
-    frames = evaluate.describe_labels(metrics, metrics)
-    assert len(frames["label_descriptions"]) == 16
-    assert len(frames["label_group_descriptions"]) == 6
-    assert len(frames["label_domain_descriptions"]) == 2
+    label_group_desc = descriptions_to_group_level(metrics, extra=["label"])
+    label_group_dist = distances_to_group_level(metrics, extra=["label"])
+    label_domain_desc = descriptions_to_domain_level(label_group_desc, extra=["label"])
+    label_domain_dist = distances_to_domain_level(label_group_dist, extra=["label"])
+    assert len(metrics) == 16
+    assert len(label_group_desc) == 6
+    assert len(label_domain_desc) == 2
 
-    assert len(frames["label_distances"]) == 16
-    assert len(frames["label_group_distances"]) == 6
-    assert len(frames["label_domain_distances"]) == 2
+    assert len(metrics) == 16
+    assert len(label_group_dist) == 6
+    assert len(label_domain_dist) == 2

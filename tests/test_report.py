@@ -3,7 +3,8 @@ from pandas import DataFrame, Series
 
 from acteval.density.features.times import start_times_by_act
 from acteval.distance.scalar import mae
-from acteval.evaluate import evaluate, extract_default, score_features
+from acteval._pipeline import _make_default, _score_features
+from acteval.evaluate import compare
 from acteval.population import Population
 
 
@@ -21,16 +22,16 @@ def test_describe_feature():
 
 def test_create_default():
     feature = {"home": (array([0, 1, 2, 3]), array([10, 0, 2, 3]))}
-    default = extract_default(feature)
+    default = _make_default(feature)
     assert (default[0] == array([0])).all()
     assert (default[1] == array([1])).all()
     feature = {"home": (array([[0, 0], [10, 10]]), array([10, 3]))}
-    default = extract_default(feature)
+    default = _make_default(feature)
     assert (default[0] == array([[0, 0]])).all()
     assert (default[1] == array([1])).all()
 
 
-def test_score_features():
+def test__score_features():
     observed = DataFrame(
         [
             {"pid": 0, "act": "home", "start": 0},
@@ -52,7 +53,7 @@ def test_score_features():
     expected = Series({"home": 0.0, "work": 0.0}, name="test").sort_index()
     x = start_times_by_act(Population(observed))
     y = start_times_by_act(Population(y))
-    result = score_features("test", x, y, mae, (array([0]), array([1]))).sort_index()
+    result = _score_features("test", x, y, mae, (array([0]), array([1]))).sort_index()
     assert result.equals(expected)
 
 
@@ -76,7 +77,7 @@ def test_score_features_with_default():
     expected = Series({"home": 0.0, "work": 1.0}, name="test").sort_index()
     x = start_times_by_act(Population(observed))
     y = start_times_by_act(Population(y))
-    result = score_features("test", x, y, mae, (array([0]), array([1]))).sort_index()
+    result = _score_features("test", x, y, mae, (array([0]), array([1]))).sort_index()
     assert result.equals(expected)
 
 
@@ -99,7 +100,7 @@ def test_report_same():
             {"pid": 1, "act": "work", "start": 10, "end": 24, "duration": 14},
         ]
     )
-    evaluate({"y": y}, observed, None)
+    compare(observed, {"y": y})
 
 
 def test_report():
@@ -121,4 +122,4 @@ def test_report():
             {"pid": 1, "act": "work", "start": 12, "end": 24, "duration": 12},
         ]
     )
-    evaluate({"y": y}, observed, None)
+    compare(observed, {"y": y})

@@ -94,7 +94,7 @@ Pass `report_stats=True` to include additional statistics in the output.
 
 ### `Evaluator`
 
-Use `Evaluator` when comparing multiple synthetic populations against the same observed data — it computes and caches the observed features once.
+Use `Evaluator` when comparing multiple synthetic populations against the same observed data — it computes and caches the observed features once. Each `compare()` call is independent.
 
 ```python
 from acteval import Evaluator
@@ -103,6 +103,14 @@ evaluator = Evaluator(observed)
 
 result_v1 = evaluator.compare({"v1": synthetic_v1})
 result_v2 = evaluator.compare({"v2": synthetic_v2})
+```
+
+For fine-grained control, compare one model at a time then assemble:
+
+```python
+evaluator.compare_population("v1", synthetic_v1)
+evaluator.compare_population("v2", synthetic_v2)
+result = evaluator.report()
 ```
 
 ### `Population`
