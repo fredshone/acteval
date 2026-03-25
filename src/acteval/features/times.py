@@ -1,8 +1,8 @@
 import numpy as np
 from numpy import ndarray
 
-from acteval.density.features.pid_features import PidFeatures
-from acteval.density.features.utils import (
+from acteval.features._pid_features import PidFeatures
+from acteval.features._utils import (
     _collect_by_group,
     _collect_by_group_with_pids,
     weighted_features,

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from numpy import ndarray
 
-from acteval.density.features.utils import compress_feature
+from acteval.features._utils import compress_feature
 
 
 @dataclass

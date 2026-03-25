@@ -2,8 +2,8 @@ import numpy as np
 from numpy import ndarray
 from pandas import DataFrame, MultiIndex, Series
 
-from acteval.density.features.pid_features import PidFeatures
-from acteval.density.features.utils import weighted_features
+from acteval.features._pid_features import PidFeatures
+from acteval.features._utils import weighted_features
 from acteval.population import Population
 
 
@@ -72,7 +72,6 @@ def ngrams_per_pid(
         result_data[label] = (count_matrix[:, j], unique_pids)
 
     return PidFeatures(data=result_data, bin_size=None, factor=1)
-
 
 
 def tour(acts: Series) -> str:

@@ -1,9 +1,9 @@
 from numpy import array
 from pandas import DataFrame, Series
 
-from acteval.density.features import transitions
-from acteval.density.features.transitions import ngrams_per_pid
-from acteval.density.features.utils import equals
+from acteval.features import transitions
+from acteval.features.transitions import ngrams_per_pid
+from acteval.features._utils import equals
 from acteval.population import Population
 
 

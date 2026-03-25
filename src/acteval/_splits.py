@@ -2,8 +2,8 @@ import re
 
 import numpy as np
 
-from acteval.density.features.pid_features import PidFeatures
-from acteval.jobs import JobSpec, get_jobs
+from acteval.features._pid_features import PidFeatures
+from acteval._jobs import JobSpec, get_jobs
 
 _TRAILING_DIGITS = re.compile(r"\d+$")
 

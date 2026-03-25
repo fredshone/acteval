@@ -2,8 +2,8 @@ import numpy as np
 from itertools import combinations_with_replacement
 from numpy import array, ndarray
 
-from acteval.density.features.pid_features import PidFeatures
-from acteval.density.features.utils import (
+from acteval.features._pid_features import PidFeatures
+from acteval.features._utils import (
     _count_matrix,
     weighted_features,
 )

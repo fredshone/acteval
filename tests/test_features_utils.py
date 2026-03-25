@@ -1,6 +1,6 @@
 from numpy import array
 
-from acteval.density.features import utils
+from acteval.features import _utils as utils
 
 
 def test_equals():

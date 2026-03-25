@@ -9,11 +9,11 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
-from acteval.density.features import participation, times
-from acteval.density.features.transitions import ngrams_per_pid
+from acteval.features import participation, times
+from acteval.features.transitions import ngrams_per_pid
 from acteval.distance import emd
-from acteval.ops import average, average2d, feature_weight, time_average
-from acteval.structural.features import structural
+from acteval._aggregation import average, average2d, feature_weight, time_average
+from acteval.features import structural
 
 _DEFAULT_CONFIG = Path(__file__).parent / "config.toml"
 

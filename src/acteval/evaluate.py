@@ -16,16 +16,15 @@ from acteval._splits import (
     _get_density_jobs,
     _key_activities,
 )
-from acteval.creativity.features import creativity
-from acteval.jobs import get_jobs
-from acteval.population import Population
-from acteval.post_process import (
+from acteval._aggregation import (
     descriptions_to_domain_level,
     descriptions_to_group_level,
     distances_to_domain_level,
     distances_to_group_level,
 )
-from acteval.structural.features import structural
+from acteval.features import creativity, structural
+from acteval._jobs import get_jobs
+from acteval.population import Population
 
 
 class EvalResult:

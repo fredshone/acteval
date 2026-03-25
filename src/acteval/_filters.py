@@ -1,6 +1,6 @@
 from pandas import DataFrame
 
-from acteval.creativity.features import creativity
+from acteval.features import creativity
 
 
 def no_filter(scenario: DataFrame, base: DataFrame) -> DataFrame:

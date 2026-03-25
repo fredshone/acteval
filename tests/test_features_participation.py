@@ -1,8 +1,8 @@
 from numpy import array
 from pandas import DataFrame
 
-from acteval.density.features import participation
-from acteval.density.features.utils import equals
+from acteval.features import participation
+from acteval.features._utils import equals
 from acteval.population import Population
 
 

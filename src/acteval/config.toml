@@ -1,24 +1,33 @@
+# Minimum number of times an n-gram must appear across the full observed
+# population to be included as a feature. Raising this reduces noise from
+# rare activity sequences at the cost of ignoring less common patterns.
 [ngrams]
 min_count = 3
 
+# Which evaluation jobs to run. Set any key to false to skip that feature.
 [jobs.participations]
-lengths     = true
-rates       = true
-pair_rates  = true
+lengths     = true  # distribution of sequence lengths (number of episodes per person)
+rates       = true  # per-activity participation rates
+pair_rates  = true  # joint participation rates for all pairs of activities
 
+# N-gram transition features. Each captures co-occurrence of consecutive activities.
 [jobs.transitions]
-"2-gram" = true
-"3-gram" = true
-"4-gram" = true
+"2-gram" = true  # pairs:  home>work
+"3-gram" = true  # triples: home>work>home
+"4-gram" = true  # quads:   home>work>home>work
 
+# Timing features. A distance of 1.0 means the activity is entirely absent
+# from the synthetic population (maximum penalty), not just timed differently.
 [jobs.timing]
-start_times     = true
-durations       = true
-start_durations = true
-joint_durations = true
+start_times     = true  # start time distribution per activity × enumeration
+durations       = true  # duration distribution per activity × enumeration
+start_durations = true  # joint (start, duration) 2D distribution per activity
+joint_durations = true  # joint (duration_i, duration_i+1) for consecutive activities
 
+# Creativity metrics: how novel and diverse the synthetic schedules are.
 [jobs.creativity]
 enabled = true
 
+# Structural / feasibility metrics: home-based schedules, no consecutive duplicates.
 [jobs.structural]
 enabled = true

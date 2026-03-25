@@ -3,7 +3,7 @@ from numpy import array
 from pandas import Series
 from pandas.testing import assert_series_equal
 
-from acteval import ops
+from acteval import _aggregation as ops
 
 
 def test_feature_weight():

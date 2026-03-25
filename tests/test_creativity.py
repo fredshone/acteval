@@ -1,6 +1,6 @@
 from pandas import DataFrame
 
-from acteval.creativity.features.creativity import (
+from acteval.features.creativity import (
     conservatism,
     diversity,
     hash_population,

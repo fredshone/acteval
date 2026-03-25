@@ -124,3 +124,56 @@ pop = Population(observed)
 print(pop.acts)       # activity labels per episode
 print(pop.durations)  # durations as numpy array
 ```
+
+## Reading the results
+
+### The six DataFrames
+
+`compare()` returns an `EvalResult` with six DataFrames at three levels of aggregation:
+
+| Property | Index | Content |
+|----------|-------|---------|
+| `result.distances` | `(domain, feature, segment)` | Per-feature distances — lower is closer to observed |
+| `result.descriptions` | `(domain, feature, segment)` | Per-feature descriptive statistics (e.g. average start time) |
+| `result.group_distances` | `(domain, feature)` | Distances averaged across segments |
+| `result.group_descriptions` | `(domain, feature)` | Descriptions averaged across segments |
+| `result.domain_distances` | `(domain,)` | Distances averaged across features — one row per domain |
+| `result.domain_descriptions` | `(domain,)` | Descriptions averaged across features |
+
+Distances are in the range **0–1** (lower is better). A distance of `0.0` means the synthetic distribution perfectly matches observed; `1.0` is the maximum penalty.
+
+> **Note on timing features:** A distance of `1.0` for a timing feature means the activity is *entirely absent* from the synthetic population — not just timed differently. This is treated as a maximum-penalty missing feature rather than a distributional difference.
+
+### Evaluation domains
+
+| Domain | What it measures |
+|--------|-----------------|
+| `participations` | Who does what and how often — participation rates, joint participation, sequence lengths |
+| `transitions` | Activity sequences — 2-, 3-, and 4-gram transition patterns |
+| `timing` | When and how long — start times, durations, and their joint distributions |
+| `creativity` | How novel and diverse the synthetic schedules are relative to observed |
+| `feasibility` | Structural validity — home-based schedules, no consecutive duplicate activities |
+
+### Ranking models
+
+```python
+result = compare(observed, {"model_a": df_a, "model_b": df_b})
+
+# Mean domain distance per model (lower is better)
+print(result.rank_models())
+# model_a    0.12
+# model_b    0.19
+
+# Best model
+print(result.best_model)   # "model_a"
+
+# Domain-level summary table
+print(result.summary())
+#                   model_a  model_b
+# domain
+# creativity           0.08     0.14
+# feasibility          0.03     0.05
+# participations       0.11     0.18
+# timing               0.16     0.22
+# transitions          0.22     0.35
+```

@@ -1,7 +1,7 @@
 from numpy import array
 from pandas import DataFrame, Series
 
-from acteval.density.features.times import start_times_by_act
+from acteval.features.times import start_times_by_act
 from acteval.distance.scalar import mae
 from acteval._pipeline import _make_default, _score_features
 from acteval.evaluate import compare

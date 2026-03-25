@@ -8,11 +8,11 @@ Verifies:
 import numpy as np
 from pandas import DataFrame
 
-from acteval.density.features import participation, times
-from acteval.density.features.transitions import ngrams_per_pid
+from acteval.features import participation, times
+from acteval.features.transitions import ngrams_per_pid
 from acteval.evaluate import Evaluator, compare_splits
 from acteval.population import Population
-from acteval.structural.features import structural
+from acteval.features import structural
 
 
 def _pop():

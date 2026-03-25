@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 from matplotlib.patches import Patch
 from pandas import DataFrame
 
-from acteval.density.features.frequency import binned_activity_density
+from acteval.features.frequency import binned_activity_density
 
 
 def frequency_plots(observed: DataFrame, ys: Optional[dict[DataFrame]], **kwargs):

@@ -3,15 +3,15 @@ from pandas import DataFrame, MultiIndex, Series, concat
 
 from acteval import evaluate
 from acteval._pipeline import describe
-from acteval.density.features.utils import equals
-from acteval.post_process import (
+from acteval.features._utils import equals
+from acteval._aggregation import (
     descriptions_to_domain_level,
     descriptions_to_group_level,
     distances_to_domain_level,
     distances_to_group_level,
 )
 from acteval.population import Population
-from acteval.structural.features.structural import (
+from acteval.features.structural import (
     contains_consecutive,
     duration_consistency,
     feasibility_eval,

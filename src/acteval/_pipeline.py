@@ -43,70 +43,16 @@ from typing import Callable
 import numpy as np
 from pandas import DataFrame, MultiIndex, Series, concat
 
-from acteval.creativity.features import creativity
-from acteval.jobs import JobSpec
+from acteval._aggregation import (
+    _REMOVE_FEATURES,
+    _REMOVE_GROUPS,
+    _drop_features,
+    distance_weighted_average,
+    weighted_average,
+)
+from acteval.features import creativity, structural
+from acteval._jobs import JobSpec
 from acteval.population import Population
-from acteval.structural.features import structural
-
-# ---------------------------------------------------------------------------
-# Aggregation helpers (formerly _aggregate.py)
-# ---------------------------------------------------------------------------
-
-_REMOVE_FEATURES = [
-    ("feasibility", "not home based", "starts"),
-    ("feasibility", "not home based", "ends"),
-    ("feasibility", "consecutive", "home"),
-    ("feasibility", "consecutive", "work"),
-    ("feasibility", "consecutive", "education"),
-]
-
-_REMOVE_GROUPS = [
-    ("feasibility", "not home based"),
-    ("feasibility", "consecutive"),
-]
-
-
-def _drop_features(df: DataFrame, features: list[tuple]) -> DataFrame:
-    sorted_df = df.sort_index()
-    if not features:
-        return df
-    n = len(features[0])
-    feature_set = set(features)
-    to_drop = [idx for idx in sorted_df.index if idx[:n] in feature_set]
-    if not to_drop:
-        return df
-    return sorted_df.drop(to_drop, axis=0)
-
-
-def weighted_average(report: DataFrame, suffix: str = "__weight") -> Series:
-    """Weighted average of dataframe using weights in the weight column."""
-    cols = [c for c in report.columns if not c.endswith(suffix)]
-    scores = DataFrame()
-    for c in cols:
-        weights = report[f"{c}{suffix}"]
-        total = weights.sum()
-        scores[c] = report[c] * weights / total
-    return scores.sum()
-
-
-def distance_weighted_average(
-    report: DataFrame,
-    base_col: str = "observed__weight",
-    suffix: str = "__weight",
-) -> Series:
-    """Weighted average using both model weights and base weights.
-
-    Averaging base and model weights handles cases where models have different
-    feature coverage — features present in only one side get half-weight.
-    """
-    cols = [c for c in report.columns if not c.endswith(suffix)]
-    base_weights = report[base_col]
-    scores = DataFrame()
-    for c in cols:
-        weights = (report[f"{c}{suffix}"] + base_weights) / 2
-        total = weights.sum()
-        scores[c] = report[c] * weights / total
-    return scores.sum()
 
 
 def add_stats(data: DataFrame, columns: dict[str, DataFrame]):
@@ -127,7 +73,7 @@ def _aggregate_features(
 
 
 def describe(descriptions: DataFrame, distances: DataFrame) -> dict[str, DataFrame]:
-    from acteval.post_process import (
+    from acteval._aggregation import (
         descriptions_to_domain_level,
         descriptions_to_group_level,
         distances_to_domain_level,

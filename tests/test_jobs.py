@@ -1,4 +1,4 @@
-from acteval.jobs import JobSpec, get_jobs
+from acteval._jobs import JobSpec, get_jobs
 
 
 def test_get_jobs_returns_flat_job_spec_list():

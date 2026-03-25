@@ -1,6 +1,6 @@
 from pandas import DataFrame
 
-from acteval.filters import filter_novel, no_filter
+from acteval._filters import filter_novel, no_filter
 
 
 def test_filter_noop():

@@ -2,7 +2,7 @@ import numpy as np
 from numpy import arange, ndarray
 from pandas import DataFrame
 
-from acteval.density.features._discretise import descretise_population
+from acteval.features._discretise import descretise_population
 
 
 def count_schedules(population: DataFrame) -> int:

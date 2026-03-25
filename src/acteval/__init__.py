@@ -1,3 +1,5 @@
+__all__ = ["EvalResult", "Evaluator", "Population", "compare", "compare_splits"]
+
 from acteval.evaluate import (
     EvalResult as EvalResult,
 )

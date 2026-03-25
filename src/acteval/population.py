@@ -4,7 +4,7 @@ import numpy as np
 from numpy import ndarray
 from pandas import DataFrame
 
-from acteval.density.features.utils import _cumcount
+from acteval.features._utils import _cumcount
 
 
 class Population:

@@ -4,8 +4,8 @@ import numpy as np
 from numpy import array, ndarray
 from pandas import DataFrame, MultiIndex, Series
 
-from acteval.density.features.pid_features import PidFeatures
-from acteval.density.features.utils import (
+from acteval.features._pid_features import PidFeatures
+from acteval.features._utils import (
     _grouped_sum,
     weighted_features,
 )

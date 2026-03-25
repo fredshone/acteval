@@ -7,7 +7,7 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Patch
 from pandas import DataFrame
 
-from acteval.density.features.transitions import sequence_probs
+from acteval.features.transitions import sequence_probs
 
 
 def sequence_prob_plot(
