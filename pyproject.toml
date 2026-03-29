@@ -15,7 +15,15 @@ dependencies = [
 ]
 
 [tool.uv]
-dev-dependencies = ["pytest", "pytest-cov", "pytest-benchmark", "ruff", "black"]
+dev-dependencies = [
+    "pytest",
+    "pytest-cov",
+    "pytest-benchmark",
+    "ruff",
+    "black",
+    "matplotlib>=3.7.5",
+    "seaborn>=0.13.2",
+]
 
 [build-system]
 requires = ["hatchling"]
