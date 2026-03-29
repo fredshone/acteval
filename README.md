@@ -39,6 +39,42 @@ black --check src/ tests/
 black src/ tests/
 ```
 
+## Benchmarks
+
+Two benchmark suites are included, both using [pytest-benchmark](https://pytest-benchmark.readthedocs.io/).
+
+### Population evaluation (`compare`)
+
+Tests `compare()` at 1k, 20k, and 100k rows (observed + synthetic populations):
+
+```bash
+uv run pytest tests/test_bench_evaluate.py --benchmark-only -v
+```
+
+### Pairwise distances (`pairwise_distances`)
+
+Tests `pairwise_distances()` at 256, 512, and 1024 schedules:
+
+```bash
+uv run pytest tests/test_bench_pairwise.py --benchmark-only -v
+```
+
+### Both suites together
+
+```bash
+uv run pytest tests/test_bench_evaluate.py tests/test_bench_pairwise.py --benchmark-only -v
+```
+
+### Comparing runs
+
+```bash
+# Save a baseline
+uv run pytest tests/test_bench_evaluate.py tests/test_bench_pairwise.py --benchmark-only --benchmark-save=baseline
+
+# Compare against it after making changes
+uv run pytest tests/test_bench_evaluate.py tests/test_bench_pairwise.py --benchmark-only --benchmark-compare=baseline
+```
+
 ## Input format
 
 Data is passed as a pandas DataFrame with one row per activity episode:
@@ -112,6 +148,53 @@ evaluator.compare_population("v1", synthetic_v1)
 evaluator.compare_population("v2", synthetic_v2)
 result = evaluator.report()
 ```
+
+### `pairwise_distances(schedules)`
+
+Compute pairwise distances between individual schedules, returning four NxN distance matrices. Useful for clustering, outlier detection, or directly comparing a small batch of schedules.
+
+```python
+from acteval import pairwise_distances
+
+result = pairwise_distances(schedules)
+```
+
+`result` has four NxN numpy arrays — one per domain plus a combined average:
+
+| attribute | description |
+|-----------|-------------|
+| `result.participations` | Distances based on activity count features |
+| `result.transitions` | Distances based on bi-gram transition counts |
+| `result.timing` | Distances based on mean activity durations |
+| `result.combined` | Equal-weight average of the three domain matrices |
+
+Each matrix is symmetric with zeros on the diagonal. All values are in **0–1**.
+
+```python
+# Access as attributes or dict-style
+result.combined          # numpy array, shape (N, N)
+result["participations"] # same thing
+
+# Get a labeled DataFrame with original pid values as index/columns
+df = result.to_dataframe("combined")
+
+# Example: find the two most similar schedules
+import numpy as np
+dist = result.to_dataframe("combined")
+dist.values[np.arange(len(dist)), np.arange(len(dist))] = np.inf
+i, j = np.unravel_index(dist.values.argmin(), dist.shape)
+print(f"Most similar: {dist.index[i]} and {dist.columns[j]}")
+```
+
+Features used per domain:
+
+| Domain | Features |
+|--------|----------|
+| `participations` | Count of each activity type per person |
+| `transitions` | Count of each bi-gram (activity pair) per person |
+| `timing` | Mean duration per activity type per person |
+
+Missing features (a person never performed an activity) are treated as zero.
 
 ### `Population`
 

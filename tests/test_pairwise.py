@@ -1,0 +1,283 @@
+import numpy as np
+import pytest
+from pandas import DataFrame
+
+from acteval.pairwise import (
+    PairwiseResult,
+    _extract_feature_matrix,
+    _mean_duration_per_act_per_pid,
+    _normalize_columns,
+    _pairwise_mae,
+    pairwise_distances,
+)
+from acteval.population import Population
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def three_schedules():
+    """Three distinct schedules: home-only, home-work, home-work-shop."""
+    return DataFrame(
+        [
+            # pid 0: home only
+            {"pid": 0, "act": "home", "start": 0, "end": 24, "duration": 24},
+            # pid 1: home + work
+            {"pid": 1, "act": "home", "start": 0, "end": 8, "duration": 8},
+            {"pid": 1, "act": "work", "start": 8, "end": 16, "duration": 8},
+            {"pid": 1, "act": "home", "start": 16, "end": 24, "duration": 8},
+            # pid 2: home + work + shop
+            {"pid": 2, "act": "home", "start": 0, "end": 6, "duration": 6},
+            {"pid": 2, "act": "work", "start": 6, "end": 14, "duration": 8},
+            {"pid": 2, "act": "shop", "start": 14, "end": 18, "duration": 4},
+            {"pid": 2, "act": "home", "start": 18, "end": 24, "duration": 6},
+        ]
+    )
+
+
+@pytest.fixture
+def identical_schedules():
+    """Two identical schedules."""
+    row = lambda pid: [
+        {"pid": pid, "act": "home", "start": 0, "end": 8, "duration": 8},
+        {"pid": pid, "act": "work", "start": 8, "end": 16, "duration": 8},
+        {"pid": pid, "act": "home", "start": 16, "end": 24, "duration": 8},
+    ]
+    return DataFrame(row(0) + row(1))
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _mean_duration_per_act_per_pid
+# ---------------------------------------------------------------------------
+
+
+def test_mean_duration_single_occurrence():
+    df = DataFrame(
+        [
+            {"pid": 0, "act": "work", "start": 8, "end": 16, "duration": 8},
+            {"pid": 1, "act": "work", "start": 9, "end": 17, "duration": 8},
+        ]
+    )
+    pop = Population(df)
+    result = _mean_duration_per_act_per_pid(pop)
+    assert "work" in result
+    vals, pids = result["work"]
+    assert len(vals) == 2
+    np.testing.assert_array_almost_equal(vals, [8.0, 8.0])
+
+
+def test_mean_duration_multiple_occurrences():
+    """Person with 2 work activities: mean duration should be (6+10)/2 = 8."""
+    df = DataFrame(
+        [
+            {"pid": 0, "act": "work", "start": 0, "end": 6, "duration": 6},
+            {"pid": 0, "act": "work", "start": 10, "end": 20, "duration": 10},
+        ]
+    )
+    pop = Population(df)
+    result = _mean_duration_per_act_per_pid(pop)
+    vals, pids = result["work"]
+    assert len(vals) == 1
+    assert pids[0] == 0
+    assert vals[0] == pytest.approx(8.0)
+
+
+def test_mean_duration_missing_activity():
+    """Person 0 has no shop; only person 1 should appear in shop entry."""
+    df = DataFrame(
+        [
+            {"pid": 0, "act": "home", "start": 0, "end": 24, "duration": 24},
+            {"pid": 1, "act": "shop", "start": 0, "end": 4, "duration": 4},
+        ]
+    )
+    pop = Population(df)
+    result = _mean_duration_per_act_per_pid(pop)
+    assert "shop" in result
+    _, shop_pids = result["shop"]
+    assert 0 not in shop_pids
+    assert 1 in shop_pids
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _extract_feature_matrix
+# ---------------------------------------------------------------------------
+
+
+def test_extract_feature_matrix_shape():
+    data = {
+        "home": (np.array([2.0, 1.0, 3.0]), np.array([0, 1, 2])),
+        "work": (np.array([0.0, 1.0]), np.array([1, 2])),
+    }
+    matrix, keys = _extract_feature_matrix(data, n_persons=3)
+    assert matrix.shape == (3, 2)
+    assert set(keys) == {"home", "work"}
+
+
+def test_extract_feature_matrix_missing_filled_with_zero():
+    data = {"work": (np.array([5.0]), np.array([1]))}
+    matrix, _ = _extract_feature_matrix(data, n_persons=3)
+    assert matrix[0, 0] == 0.0  # pid 0 absent → 0
+    assert matrix[1, 0] == 5.0
+    assert matrix[2, 0] == 0.0  # pid 2 absent → 0
+
+
+def test_extract_feature_matrix_factor():
+    data = {"work": (np.array([1440.0, 720.0]), np.array([0, 1]))}
+    matrix, _ = _extract_feature_matrix(data, n_persons=2, factor=1440.0)
+    assert matrix[0, 0] == pytest.approx(1.0)
+    assert matrix[1, 0] == pytest.approx(0.5)
+
+
+def test_extract_feature_matrix_empty():
+    matrix, keys = _extract_feature_matrix({}, n_persons=5)
+    assert matrix.shape == (5, 0)
+    assert keys == []
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _normalize_columns
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_columns_standard():
+    matrix = np.array([[0.0, 2.0], [4.0, 8.0], [8.0, 4.0]])
+    norm = _normalize_columns(matrix)
+    assert norm[:, 0].min() == pytest.approx(0.0)
+    assert norm[:, 0].max() == pytest.approx(1.0)
+    assert norm[:, 1].min() == pytest.approx(0.0)
+    assert norm[:, 1].max() == pytest.approx(1.0)
+
+
+def test_normalize_columns_zero_range():
+    matrix = np.array([[3.0], [3.0], [3.0]])
+    norm = _normalize_columns(matrix)
+    np.testing.assert_array_equal(norm, np.zeros((3, 1)))
+
+
+def test_normalize_columns_empty():
+    matrix = np.zeros((4, 0))
+    norm = _normalize_columns(matrix)
+    assert norm.shape == (4, 0)
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _pairwise_mae
+# ---------------------------------------------------------------------------
+
+
+def test_pairwise_mae_zero_diagonal():
+    matrix = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+    dist = _pairwise_mae(matrix)
+    np.testing.assert_array_almost_equal(np.diag(dist), [0.0, 0.0, 0.0])
+
+
+def test_pairwise_mae_symmetry():
+    rng = np.random.default_rng(42)
+    matrix = rng.random((5, 10))
+    dist = _pairwise_mae(matrix)
+    np.testing.assert_array_almost_equal(dist, dist.T)
+
+
+def test_pairwise_mae_known_value():
+    # Two persons, one feature: values 0.0 and 1.0 → MAE = 1.0
+    matrix = np.array([[0.0], [1.0]])
+    dist = _pairwise_mae(matrix)
+    assert dist[0, 1] == pytest.approx(1.0)
+    assert dist[1, 0] == pytest.approx(1.0)
+
+
+def test_pairwise_mae_chunking_matches_full():
+    rng = np.random.default_rng(7)
+    matrix = rng.random((10, 37))
+    dist_full = _pairwise_mae(matrix, chunk_size=37)
+    dist_chunked = _pairwise_mae(matrix, chunk_size=5)
+    np.testing.assert_array_almost_equal(dist_full, dist_chunked)
+
+
+def test_pairwise_mae_empty_features():
+    matrix = np.zeros((3, 0))
+    dist = _pairwise_mae(matrix)
+    assert dist.shape == (3, 3)
+    np.testing.assert_array_equal(dist, np.zeros((3, 3)))
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: pairwise_distances
+# ---------------------------------------------------------------------------
+
+
+def test_pairwise_distances_shape(three_schedules):
+    result = pairwise_distances(three_schedules)
+    for domain in ("participations", "transitions", "timing", "combined"):
+        assert result[domain].shape == (3, 3), f"wrong shape for {domain}"
+
+
+def test_pairwise_distances_zero_diagonal(three_schedules):
+    result = pairwise_distances(three_schedules)
+    for domain in ("participations", "transitions", "timing", "combined"):
+        np.testing.assert_array_almost_equal(
+            np.diag(result[domain]), np.zeros(3), err_msg=f"non-zero diagonal in {domain}"
+        )
+
+
+def test_pairwise_distances_symmetry(three_schedules):
+    result = pairwise_distances(three_schedules)
+    for domain in ("participations", "transitions", "timing", "combined"):
+        m = result[domain]
+        np.testing.assert_array_almost_equal(m, m.T, err_msg=f"not symmetric: {domain}")
+
+
+def test_pairwise_distances_values_in_range(three_schedules):
+    result = pairwise_distances(three_schedules)
+    for domain in ("participations", "transitions", "timing", "combined"):
+        m = result[domain]
+        assert m.min() >= -1e-9, f"{domain} has negative values"
+        assert m.max() <= 1 + 1e-9, f"{domain} has values > 1"
+
+
+def test_pairwise_distances_identical_schedules(identical_schedules):
+    result = pairwise_distances(identical_schedules)
+    assert result.combined[0, 1] == pytest.approx(0.0)
+    assert result.combined[1, 0] == pytest.approx(0.0)
+
+
+def test_pairwise_distances_pids_preserved():
+    df = DataFrame(
+        [
+            {"pid": "alice", "act": "home", "start": 0, "end": 24, "duration": 24},
+            {"pid": "bob", "act": "home", "start": 0, "end": 12, "duration": 12},
+            {"pid": "bob", "act": "work", "start": 12, "end": 24, "duration": 12},
+        ]
+    )
+    result = pairwise_distances(df)
+    assert set(result.pids) == {"alice", "bob"}
+
+
+def test_pairwise_distances_to_dataframe(three_schedules):
+    result = pairwise_distances(three_schedules)
+    df = result.to_dataframe("combined")
+    assert df.shape == (3, 3)
+    assert list(df.index) == list(result.pids)
+    assert list(df.columns) == list(result.pids)
+
+
+def test_pairwise_distances_getitem(three_schedules):
+    result = pairwise_distances(three_schedules)
+    assert isinstance(result["combined"], np.ndarray)
+    assert isinstance(result["participations"], np.ndarray)
+
+
+def test_pairwise_distances_single_pid_raises():
+    df = DataFrame(
+        [{"pid": 0, "act": "home", "start": 0, "end": 24, "duration": 24}]
+    )
+    with pytest.raises(ValueError, match="at least 2"):
+        pairwise_distances(df)
+
+
+def test_pairwise_distances_repr(three_schedules):
+    result = pairwise_distances(three_schedules)
+    assert "3" in repr(result)
