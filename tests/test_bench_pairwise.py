@@ -19,9 +19,9 @@ from acteval.pairwise import pairwise_distances
 ACTIVITIES = ["home", "work", "shop", "education", "leisure"]
 
 SIZES = [
-    pytest.param(256, id="256"),
-    pytest.param(512, id="512"),
-    pytest.param(1024, id="1024"),
+    pytest.param(256, id="N=256"),
+    pytest.param(512, id="N=512"),
+    pytest.param(1024, id="N=1024"),
 ]
 
 
@@ -58,6 +58,7 @@ def schedules(request):
     return generate_schedules(request.param, seed=42)
 
 
-def test_bench_pairwise_distances(benchmark, schedules):
+@pytest.mark.benchmark(group="pairwise_distances")
+def test_pairwise(benchmark, schedules):
     """Benchmark pairwise_distances() at three schedule-count scales."""
     benchmark(pairwise_distances, schedules)

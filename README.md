@@ -20,11 +20,11 @@ uv add acteval
 # Install dependencies (including dev tools)
 uv sync
 
-# Run tests
-pytest tests/
+# Run tests (benchmarks excluded by default)
+uv run pytest tests/
 
 # Run tests with coverage
-pytest --cov=src/acteval tests/
+uv run pytest --cov=src/acteval tests/
 
 # Lint with ruff
 ruff check src/ tests/

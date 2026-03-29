@@ -1,10 +1,20 @@
 """Pairwise schedule distance computation.
 
-Computes NxN distance matrices between individual activity schedules using
-per-person feature vectors and MAE as the distance metric.
+Computes a single NxN distance matrix between individual activity schedules by
+aggregating one or more :class:`PairwiseSpec` distance contributions.
+
+Each ``PairwiseSpec`` extracts a per-person feature matrix and applies a
+distance function to produce a domain-level ``(N, N)`` matrix. The final
+result is a weighted average across all active specs.
+
+Default specs use MAE on normalised feature vectors across three semantic
+domains: participations, transitions, and timing (equal weight each).
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -14,6 +24,11 @@ from pandas import DataFrame
 from acteval.features.participation import participation_rates_by_act_per_pid
 from acteval.features.transitions import ngrams_per_pid
 from acteval.population import Population
+
+
+# ---------------------------------------------------------------------------
+# Low-level helpers (reused by feature wrappers and tests)
+# ---------------------------------------------------------------------------
 
 
 def _mean_duration_per_act_per_pid(
@@ -98,6 +113,11 @@ def _normalize_columns(matrix: ndarray) -> ndarray:
     return normalized
 
 
+# ---------------------------------------------------------------------------
+# Distance functions: (N, F) matrix → (N, N) distance matrix
+# ---------------------------------------------------------------------------
+
+
 def _pairwise_mae(matrix: ndarray, chunk_size: int = 50) -> ndarray:
     """Compute NxN pairwise MAE matrix from an ``(N, F)`` feature matrix.
 
@@ -119,80 +139,157 @@ def _pairwise_mae(matrix: ndarray, chunk_size: int = 50) -> ndarray:
     return dist / total
 
 
-class PairwiseResult:
-    """Pairwise schedule distance matrices for N schedules.
+def _pairwise_hamming(matrix: ndarray, chunk_size: int = 50) -> ndarray:
+    """Compute NxN pairwise Hamming distance on a binary ``(N, F)`` matrix.
+
+    Treats each feature as a binary flag (nonzero → True). Result is
+    normalised to [0, 1] by dividing by the number of features.
+    Processed in column chunks to bound memory.
+    """
+    n, f = matrix.shape
+    if f == 0:
+        return np.zeros((n, n), dtype=np.float64)
+
+    dist = np.zeros((n, n), dtype=np.float64)
+    for start in range(0, f, chunk_size):
+        chunk = matrix[:, start : start + chunk_size].astype(bool)
+        diff = chunk[:, np.newaxis, :] ^ chunk[np.newaxis, :, :]
+        dist += diff.sum(axis=2)
+    return dist / f
+
+
+# ---------------------------------------------------------------------------
+# Feature matrix wrappers: Population → (N, F) normalised matrix
+# ---------------------------------------------------------------------------
+
+
+def _participation_feature_matrix(pop: Population) -> ndarray:
+    pf = participation_rates_by_act_per_pid(pop)
+    matrix, _ = _extract_feature_matrix(pf.data, pop.n, factor=float(pf.factor))
+    return _normalize_columns(matrix)
+
+
+def _transition_feature_matrix(pop: Population) -> ndarray:
+    pf = ngrams_per_pid(pop, n=2, min_count=0)
+    matrix, _ = _extract_feature_matrix(pf.data, pop.n, factor=float(pf.factor))
+    return _normalize_columns(matrix)
+
+
+def _timing_feature_matrix(pop: Population) -> ndarray:
+    dur_data = _mean_duration_per_act_per_pid(pop)
+    matrix, _ = _extract_feature_matrix(dur_data, pop.n, factor=1440.0)
+    return _normalize_columns(matrix)
+
+
+# ---------------------------------------------------------------------------
+# PairwiseSpec
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PairwiseSpec:
+    """Specification for one pairwise distance contribution.
 
     Attributes:
-        pids: Original pid values, length N (index for the matrices).
-        participations: (N, N) distance matrix for the participations domain.
-        transitions: (N, N) distance matrix for the transitions domain.
-        timing: (N, N) distance matrix for the timing domain.
-        combined: (N, N) equal-weight average of non-empty domain matrices.
+        name: Label for this distance component (e.g. ``"participations"``).
+        feature_fn: Extracts a normalised ``(N, F)`` feature matrix from a
+            :class:`~acteval.population.Population`.
+        distance_fn: Computes an ``(N, N)`` distance matrix from the feature
+            matrix. Signature: ``(matrix, chunk_size) -> ndarray``.
+        weight: Contribution weight when aggregating multiple specs into the
+            final combined matrix. Specs with no features (``F == 0``) are
+            skipped regardless of weight.
     """
 
-    def __init__(
-        self,
-        pids: ndarray,
-        participations: ndarray,
-        transitions: ndarray,
-        timing: ndarray,
-        combined: ndarray,
-    ) -> None:
-        self.pids = pids
-        self.participations = participations
-        self.transitions = transitions
-        self.timing = timing
-        self.combined = combined
+    name: str
+    feature_fn: Callable[[Population], ndarray]
+    distance_fn: Callable[[ndarray, int], ndarray]
+    weight: float = 1.0
 
-    def __getitem__(self, key: str) -> ndarray:
-        return getattr(self, key)
+
+def default_pairwise_specs() -> list[PairwiseSpec]:
+    """Return the three default semantic-distance specs (equal weight).
+
+    The three domains are:
+
+    - **participations**: MAE on normalised per-person activity counts.
+    - **transitions**: MAE on normalised per-person bi-gram counts.
+    - **timing**: MAE on normalised per-person mean activity durations.
+
+    Combined these give equal weight (1/3, 1/3, 1/3) to each domain.
+    """
+    return [
+        PairwiseSpec("participations", _participation_feature_matrix, _pairwise_mae),
+        PairwiseSpec("transitions", _transition_feature_matrix, _pairwise_mae),
+        PairwiseSpec("timing", _timing_feature_matrix, _pairwise_mae),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# PairwiseResult
+# ---------------------------------------------------------------------------
+
+
+class PairwiseResult:
+    """Single pairwise distance matrix for N schedules.
+
+    Attributes:
+        pids: Original pid values, length N (index for the matrix).
+        matrix: ``(N, N)`` weighted-average distance matrix.
+    """
+
+    def __init__(self, pids: ndarray, matrix: ndarray) -> None:
+        self.pids = pids
+        self.matrix = matrix
 
     def __repr__(self) -> str:
         return f"PairwiseResult({len(self.pids)} schedules)"
 
-    def to_dataframe(self, domain: str = "combined") -> DataFrame:
-        """Return the distance matrix for ``domain`` as a labeled DataFrame.
-
-        Args:
-            domain: One of ``"participations"``, ``"transitions"``,
-                ``"timing"``, or ``"combined"``.
+    def to_dataframe(self) -> DataFrame:
+        """Return the distance matrix as a labeled DataFrame.
 
         Returns:
             DataFrame with original pid values as both index and columns.
         """
-        matrix = self[domain]
-        return pd.DataFrame(matrix, index=self.pids, columns=self.pids)
+        return pd.DataFrame(self.matrix, index=self.pids, columns=self.pids)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 
 def pairwise_distances(
     schedules: DataFrame,
     chunk_size: int = 50,
+    specs: list[PairwiseSpec] | None = None,
 ) -> PairwiseResult:
     """Compute pairwise schedule distances between all persons in a DataFrame.
 
-    Each unique ``pid`` is treated as one schedule. Features are extracted per
-    person, normalized to [0, 1], and compared using MAE. Results are
-    aggregated to three domains (participations, transitions, timing) plus a
-    combined average.
+    Each unique ``pid`` is treated as one schedule. Each :class:`PairwiseSpec`
+    extracts per-person features, computes an ``(N, N)`` distance matrix, and
+    contributes its weighted share to the final aggregate matrix.
 
-    Features used:
-    - **participations**: activity count per person per activity type
-    - **transitions**: bi-gram count per person
-    - **timing**: mean activity duration per person per activity type
+    By default, three equal-weight semantic-distance specs are used
+    (participations, transitions, timing via MAE). Pass ``specs`` to customise
+    the metrics or their relative weights.
 
     Missing features (e.g. a person never did a given activity) are treated as
-    zero.
+    zero. Specs whose feature function returns an empty matrix (no features for
+    this population) are skipped.
 
     Args:
         schedules: DataFrame with columns ``pid``, ``act``, ``start``, ``end``,
             ``duration``. Each unique ``pid`` is one schedule.
-        chunk_size: Feature chunk size for vectorized MAE computation. Controls
-            the memory / speed trade-off. Default 50 is suitable for up to
-            ~1000 schedules.
+        chunk_size: Feature chunk size for vectorised distance computation.
+            Controls the memory / speed trade-off. Default 50 is suitable for
+            up to ~1000 schedules.
+        specs: List of :class:`PairwiseSpec` objects defining which features
+            and distance functions to use. Defaults to
+            :func:`default_pairwise_specs`.
 
     Returns:
-        :class:`PairwiseResult` with ``participations``, ``transitions``,
-        ``timing``, and ``combined`` NxN distance matrices.
+        :class:`PairwiseResult` with a single ``(N, N)`` ``matrix`` attribute.
 
     Raises:
         ValueError: If fewer than 2 unique pids are present.
@@ -203,44 +300,23 @@ def pairwise_distances(
     if n < 2:
         raise ValueError(f"pairwise_distances requires at least 2 unique pids, got {n}")
 
-    # --- Participations ---
-    part_pf = participation_rates_by_act_per_pid(pop)
-    part_matrix, _ = _extract_feature_matrix(part_pf.data, n, factor=float(part_pf.factor))
-    part_norm = _normalize_columns(part_matrix)
-    part_dist = _pairwise_mae(part_norm, chunk_size)
+    if specs is None:
+        specs = default_pairwise_specs()
 
-    # --- Transitions ---
-    bigram_pf = ngrams_per_pid(pop, n=2, min_count=0)
-    trans_matrix, _ = _extract_feature_matrix(bigram_pf.data, n, factor=float(bigram_pf.factor))
-    trans_norm = _normalize_columns(trans_matrix)
-    trans_dist = _pairwise_mae(trans_norm, chunk_size)
+    weighted_sum = np.zeros((n, n), dtype=np.float64)
+    total_weight = 0.0
 
-    # --- Timing ---
-    dur_data = _mean_duration_per_act_per_pid(pop)
-    timing_matrix, _ = _extract_feature_matrix(dur_data, n, factor=1440.0)
-    timing_norm = _normalize_columns(timing_matrix)
-    timing_dist = _pairwise_mae(timing_norm, chunk_size)
+    for spec in specs:
+        feat_matrix = spec.feature_fn(pop)
+        if feat_matrix.shape[1] == 0:
+            continue
+        dist = spec.distance_fn(feat_matrix, chunk_size)
+        weighted_sum += spec.weight * dist
+        total_weight += spec.weight
 
-    # --- Combined ---
-    domain_matrices = []
-    for matrix, dist in [
-        (part_matrix, part_dist),
-        (trans_matrix, trans_dist),
-        (timing_matrix, timing_dist),
-    ]:
-        if matrix.shape[1] > 0:
-            domain_matrices.append(dist)
+    if total_weight > 0:
+        matrix = weighted_sum / total_weight
+    else:
+        matrix = np.zeros((n, n), dtype=np.float64)
 
-    combined = (
-        np.mean(domain_matrices, axis=0)
-        if domain_matrices
-        else np.zeros((n, n), dtype=np.float64)
-    )
-
-    return PairwiseResult(
-        pids=pop.unique_pids_original,
-        participations=part_dist,
-        transitions=trans_dist,
-        timing=timing_dist,
-        combined=combined,
-    )
+    return PairwiseResult(pids=pop.unique_pids_original, matrix=matrix)

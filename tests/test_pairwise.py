@@ -4,10 +4,16 @@ from pandas import DataFrame
 
 from acteval.pairwise import (
     PairwiseResult,
+    PairwiseSpec,
     _extract_feature_matrix,
     _mean_duration_per_act_per_pid,
     _normalize_columns,
+    _pairwise_hamming,
     _pairwise_mae,
+    _participation_feature_matrix,
+    _timing_feature_matrix,
+    _transition_feature_matrix,
+    default_pairwise_specs,
     pairwise_distances,
 )
 from acteval.population import Population
@@ -205,43 +211,86 @@ def test_pairwise_mae_empty_features():
 
 
 # ---------------------------------------------------------------------------
+# Unit tests: _pairwise_hamming
+# ---------------------------------------------------------------------------
+
+
+def test_pairwise_hamming_zero_diagonal():
+    rng = np.random.default_rng(0)
+    matrix = (rng.random((4, 8)) > 0.5).astype(float)
+    dist = _pairwise_hamming(matrix)
+    np.testing.assert_array_almost_equal(np.diag(dist), np.zeros(4))
+
+
+def test_pairwise_hamming_symmetry():
+    rng = np.random.default_rng(1)
+    matrix = (rng.random((5, 10)) > 0.5).astype(float)
+    dist = _pairwise_hamming(matrix)
+    np.testing.assert_array_almost_equal(dist, dist.T)
+
+
+def test_pairwise_hamming_values_in_range():
+    rng = np.random.default_rng(2)
+    matrix = (rng.random((6, 12)) > 0.5).astype(float)
+    dist = _pairwise_hamming(matrix)
+    assert dist.min() >= -1e-9
+    assert dist.max() <= 1 + 1e-9
+
+
+def test_pairwise_hamming_known_value():
+    # Two persons, one binary feature: [1] vs [0] → Hamming = 1.0
+    matrix = np.array([[1.0], [0.0]])
+    dist = _pairwise_hamming(matrix)
+    assert dist[0, 1] == pytest.approx(1.0)
+    assert dist[1, 0] == pytest.approx(1.0)
+    assert dist[0, 0] == pytest.approx(0.0)
+
+
+def test_pairwise_hamming_chunking_matches_full():
+    rng = np.random.default_rng(3)
+    matrix = (rng.random((8, 30)) > 0.5).astype(float)
+    dist_full = _pairwise_hamming(matrix, chunk_size=30)
+    dist_chunked = _pairwise_hamming(matrix, chunk_size=7)
+    np.testing.assert_array_almost_equal(dist_full, dist_chunked)
+
+
+def test_pairwise_hamming_empty_features():
+    matrix = np.zeros((3, 0))
+    dist = _pairwise_hamming(matrix)
+    assert dist.shape == (3, 3)
+    np.testing.assert_array_equal(dist, np.zeros((3, 3)))
+
+
+# ---------------------------------------------------------------------------
 # Integration tests: pairwise_distances
 # ---------------------------------------------------------------------------
 
 
 def test_pairwise_distances_shape(three_schedules):
     result = pairwise_distances(three_schedules)
-    for domain in ("participations", "transitions", "timing", "combined"):
-        assert result[domain].shape == (3, 3), f"wrong shape for {domain}"
+    assert result.matrix.shape == (3, 3)
 
 
 def test_pairwise_distances_zero_diagonal(three_schedules):
     result = pairwise_distances(three_schedules)
-    for domain in ("participations", "transitions", "timing", "combined"):
-        np.testing.assert_array_almost_equal(
-            np.diag(result[domain]), np.zeros(3), err_msg=f"non-zero diagonal in {domain}"
-        )
+    np.testing.assert_array_almost_equal(np.diag(result.matrix), np.zeros(3))
 
 
 def test_pairwise_distances_symmetry(three_schedules):
     result = pairwise_distances(three_schedules)
-    for domain in ("participations", "transitions", "timing", "combined"):
-        m = result[domain]
-        np.testing.assert_array_almost_equal(m, m.T, err_msg=f"not symmetric: {domain}")
+    np.testing.assert_array_almost_equal(result.matrix, result.matrix.T)
 
 
 def test_pairwise_distances_values_in_range(three_schedules):
     result = pairwise_distances(three_schedules)
-    for domain in ("participations", "transitions", "timing", "combined"):
-        m = result[domain]
-        assert m.min() >= -1e-9, f"{domain} has negative values"
-        assert m.max() <= 1 + 1e-9, f"{domain} has values > 1"
+    assert result.matrix.min() >= -1e-9
+    assert result.matrix.max() <= 1 + 1e-9
 
 
 def test_pairwise_distances_identical_schedules(identical_schedules):
     result = pairwise_distances(identical_schedules)
-    assert result.combined[0, 1] == pytest.approx(0.0)
-    assert result.combined[1, 0] == pytest.approx(0.0)
+    assert result.matrix[0, 1] == pytest.approx(0.0)
+    assert result.matrix[1, 0] == pytest.approx(0.0)
 
 
 def test_pairwise_distances_pids_preserved():
@@ -258,16 +307,10 @@ def test_pairwise_distances_pids_preserved():
 
 def test_pairwise_distances_to_dataframe(three_schedules):
     result = pairwise_distances(three_schedules)
-    df = result.to_dataframe("combined")
+    df = result.to_dataframe()
     assert df.shape == (3, 3)
     assert list(df.index) == list(result.pids)
     assert list(df.columns) == list(result.pids)
-
-
-def test_pairwise_distances_getitem(three_schedules):
-    result = pairwise_distances(three_schedules)
-    assert isinstance(result["combined"], np.ndarray)
-    assert isinstance(result["participations"], np.ndarray)
 
 
 def test_pairwise_distances_single_pid_raises():
@@ -281,3 +324,63 @@ def test_pairwise_distances_single_pid_raises():
 def test_pairwise_distances_repr(three_schedules):
     result = pairwise_distances(three_schedules)
     assert "3" in repr(result)
+
+
+# ---------------------------------------------------------------------------
+# Tests: PairwiseSpec and default_pairwise_specs
+# ---------------------------------------------------------------------------
+
+
+def test_pairwise_distances_default_specs_unchanged(three_schedules):
+    """Calling with default specs explicitly gives identical results."""
+    result_default = pairwise_distances(three_schedules)
+    result_explicit = pairwise_distances(three_schedules, specs=default_pairwise_specs())
+    np.testing.assert_array_almost_equal(result_default.matrix, result_explicit.matrix)
+
+
+def test_pairwise_spec_custom_metric(three_schedules):
+    """A custom distance_fn (all-zeros) produces an all-zeros matrix."""
+    def zero_dist(matrix, chunk_size):
+        n = matrix.shape[0]
+        return np.zeros((n, n), dtype=np.float64)
+
+    spec = PairwiseSpec("custom", _participation_feature_matrix, zero_dist)
+    result = pairwise_distances(three_schedules, specs=[spec])
+    assert result.matrix.shape == (3, 3)
+    np.testing.assert_array_equal(result.matrix, np.zeros((3, 3)))
+
+
+def test_pairwise_spec_hamming(three_schedules):
+    """Hamming spec produces a valid (N, N) distance matrix."""
+    def binary_participation(pop):
+        return (pop.count_matrix > 0).astype(np.float64)
+
+    spec = PairwiseSpec("hamming_participations", binary_participation, _pairwise_hamming)
+    result = pairwise_distances(three_schedules, specs=[spec])
+    dist = result.matrix
+    assert dist.shape == (3, 3)
+    np.testing.assert_array_almost_equal(np.diag(dist), np.zeros(3))
+    np.testing.assert_array_almost_equal(dist, dist.T)
+    assert dist.min() >= -1e-9
+    assert dist.max() <= 1 + 1e-9
+
+
+def test_pairwise_weights(three_schedules):
+    """Weighted average of two specs matches manual calculation."""
+    part_result = pairwise_distances(
+        three_schedules,
+        specs=[PairwiseSpec("p", _participation_feature_matrix, _pairwise_mae, weight=1.0)],
+    )
+    timing_result = pairwise_distances(
+        three_schedules,
+        specs=[PairwiseSpec("t", _timing_feature_matrix, _pairwise_mae, weight=1.0)],
+    )
+    combined = pairwise_distances(
+        three_schedules,
+        specs=[
+            PairwiseSpec("p", _participation_feature_matrix, _pairwise_mae, weight=1.0),
+            PairwiseSpec("t", _timing_feature_matrix, _pairwise_mae, weight=2.0),
+        ],
+    )
+    expected = (part_result.matrix * 1 + timing_result.matrix * 2) / 3
+    np.testing.assert_array_almost_equal(combined.matrix, expected)
