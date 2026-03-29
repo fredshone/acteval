@@ -25,7 +25,7 @@ packages = ["src/acteval"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--benchmark-disable"
+addopts = "--ignore=tests/test_bench_evaluate.py --ignore=tests/test_bench_pairwise.py --benchmark-columns=mean,stddev,rounds --benchmark-sort=name"
 
 [tool.ruff]
 target-version = "py39"

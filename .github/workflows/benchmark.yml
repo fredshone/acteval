@@ -23,7 +23,7 @@ jobs:
 
       - name: Run benchmarks
         run: >
-          uv run pytest tests/test_bench_evaluate.py
+          uv run pytest tests/test_bench_evaluate.py tests/test_bench_pairwise.py
           --benchmark-only
           --benchmark-json output.json
 
