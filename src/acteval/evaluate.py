@@ -145,6 +145,20 @@ class Evaluator:
         split_on: list[str] | None = None,
         config_path=None,
     ):
+        if (target_attributes is None) != (split_on is None):
+            raise ValueError(
+                "target_attributes and split_on must both be provided or both be None"
+            )
+        if target_attributes is not None:
+            if "pid" not in target_attributes.columns:
+                raise ValueError(
+                    "target_attributes DataFrame is missing required column 'pid'"
+                )
+            missing = [c for c in split_on if c not in target_attributes.columns]
+            if missing:
+                raise ValueError(
+                    f"split_on column(s) {missing} not found in target_attributes"
+                )
         self._target = target
         self._target_pop = Population(target)
         self._config_path = config_path
@@ -336,6 +350,16 @@ class Evaluator:
             attributes = DataFrame(
                 {"pid": schedule["pid"].unique(), "__split__": "all"}
             )
+        else:
+            if "pid" not in attributes.columns:
+                raise ValueError(
+                    f"attributes DataFrame for model '{model}' is missing required column 'pid'"
+                )
+            missing = [c for c in self._split_on if c not in attributes.columns]
+            if missing:
+                raise ValueError(
+                    f"attributes DataFrame for model '{model}' is missing split column(s) {missing}"
+                )
         pop = Population(schedule)
         pid_features = {
             (spec.domain, spec.name): spec.feature_fn(pop)

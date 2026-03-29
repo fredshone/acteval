@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [tool.uv]
-dev-dependencies = ["pytest", "pytest-cov", "ruff", "black"]
+dev-dependencies = ["pytest", "pytest-cov", "pytest-benchmark", "ruff", "black"]
 
 [build-system]
 requires = ["hatchling"]

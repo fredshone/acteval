@@ -1,0 +1,40 @@
+name: Benchmark
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run benchmarks
+        run: >
+          uv run pytest tests/test_bench_evaluate.py
+          --benchmark-only
+          --benchmark-json output.json
+
+      - name: Store benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: pytest
+          output-file-path: output.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: "120%"
+          comment-on-alert: true
+          fail-on-alert: true
+          benchmark-data-dir-path: dev/bench

@@ -44,12 +44,41 @@ class Population:
         Args:
             df: DataFrame with columns pid, act, start, end, duration.
                 Rows are assumed sorted by pid; a defensive sort is applied if not.
-                The act, start, end, and duration columns are optional — absent
-                columns result in empty arrays.
+                The act column is optional. For timing, any two of start/end/duration
+                are sufficient — the third is derived automatically.
         """
+        if "pid" not in df.columns:
+            raise ValueError("schedule DataFrame is missing required column 'pid'")
+        if df["pid"].isna().any():
+            raise ValueError(
+                "column 'pid' contains NaN values; all rows must have a valid person ID"
+            )
+
         if len(df) == 0:
             self._init_empty()
             return
+
+        has_start = "start" in df.columns
+        has_end = "end" in df.columns
+        has_dur = "duration" in df.columns
+
+        for col in ("start", "end", "duration"):
+            if col in df.columns:
+                if not np.issubdtype(df[col].dtype, np.number):
+                    raise ValueError(
+                        f"column '{col}' must be numeric, got dtype '{df[col].dtype}'"
+                    )
+                if df[col].isna().any():
+                    raise ValueError(f"column '{col}' contains NaN values")
+
+        if has_start and has_end and has_dur:
+            if not np.allclose(
+                df["duration"].values, df["end"].values - df["start"].values, atol=1e-6
+            ):
+                raise ValueError(
+                    "columns 'start', 'end', and 'duration' are inconsistent: "
+                    "duration must equal end - start"
+                )
 
         raw_pids = df["pid"].values
 
@@ -67,9 +96,26 @@ class Population:
             return vals[order] if order is not None else vals
 
         self.acts = _col("act", object)
-        self.starts = _col("start", float)
-        self.ends = _col("end", float)
-        self.durations = _col("duration", float)
+
+        starts = _col("start", float)
+        ends = _col("end", float)
+        durations = _col("duration", float)
+
+        if has_start and has_end and not has_dur:
+            durations = ends - starts
+        elif has_start and has_dur and not has_end:
+            ends = starts + durations
+        elif has_end and has_dur and not has_start:
+            starts = ends - durations
+
+        if len(starts) > 0 and len(ends) > 0 and (starts > ends).any():
+            raise ValueError(
+                "some rows have start > end; all activity intervals must be non-negative"
+            )
+
+        self.starts = starts
+        self.ends = ends
+        self.durations = durations
 
         # Activity encoding
         if len(self.acts) > 0:
