@@ -149,52 +149,58 @@ evaluator.compare_population("v2", synthetic_v2)
 result = evaluator.report()
 ```
 
-### `pairwise_distances(schedules)`
+### `pairwise_distances(schedules, specs=None)`
 
-Compute pairwise distances between individual schedules, returning four NxN distance matrices. Useful for clustering, outlier detection, or directly comparing a small batch of schedules.
+Compute a single NxN distance matrix between individual schedules. Useful for clustering, outlier detection, or directly comparing a small batch of schedules.
 
 ```python
 from acteval import pairwise_distances
 
 result = pairwise_distances(schedules)
-```
-
-`result` has four NxN numpy arrays — one per domain plus a combined average:
-
-| attribute | description |
-|-----------|-------------|
-| `result.participations` | Distances based on activity count features |
-| `result.transitions` | Distances based on bi-gram transition counts |
-| `result.timing` | Distances based on mean activity durations |
-| `result.combined` | Equal-weight average of the three domain matrices |
-
-Each matrix is symmetric with zeros on the diagonal. All values are in **0–1**.
-
-```python
-# Access as attributes or dict-style
-result.combined          # numpy array, shape (N, N)
-result["participations"] # same thing
+result.matrix          # numpy array, shape (N, N)
+result.pids            # original pid values, length N
 
 # Get a labeled DataFrame with original pid values as index/columns
-df = result.to_dataframe("combined")
+df = result.to_dataframe()
 
 # Example: find the two most similar schedules
 import numpy as np
-dist = result.to_dataframe("combined")
+dist = result.to_dataframe()
 dist.values[np.arange(len(dist)), np.arange(len(dist))] = np.inf
 i, j = np.unravel_index(dist.values.argmin(), dist.shape)
 print(f"Most similar: {dist.index[i]} and {dist.columns[j]}")
 ```
 
-Features used per domain:
+The result matrix is symmetric with zeros on the diagonal. All values are in **0–1**.
 
-| Domain | Features |
-|--------|----------|
-| `participations` | Count of each activity type per person |
-| `transitions` | Count of each bi-gram (activity pair) per person |
-| `timing` | Mean duration per activity type per person |
+#### Pluggable distance specs
 
-Missing features (a person never performed an activity) are treated as zero.
+By default, three equal-weight semantic-distance specs are used (participations, transitions, timing via MAE). Pass a custom `specs` list to change the metrics or their relative weights:
+
+```python
+from acteval.pairwise import chamfer_spec, soft_dtw_spec, default_pairwise_specs
+
+# Chamfer distance on EOS-padded activity sequences
+result = pairwise_distances(schedules, specs=[chamfer_spec()])
+
+# Soft-DTW on EOS-padded activity sequences
+result = pairwise_distances(schedules, specs=[soft_dtw_spec(gamma=1.0)])
+
+# Mix metrics with custom weights
+result = pairwise_distances(schedules, specs=[
+    *default_pairwise_specs(),       # weight=1.0 each
+    chamfer_spec(weight=1.0),
+    soft_dtw_spec(weight=2.0),
+])
+```
+
+Each spec defines a `feature_fn` (extracts a `(N, ...)` array from the population) and a `distance_fn` (computes the `(N, N)` matrix). The final matrix is a weighted average across all active specs.
+
+| Factory | Description |
+|---------|-------------|
+| `default_pairwise_specs()` | MAE on participation counts, bi-gram counts, mean durations |
+| `chamfer_spec(max_len, weight)` | Chamfer distance on EOS-padded `(N, L, 2)` sequences |
+| `soft_dtw_spec(max_len, gamma, weight)` | Soft-DTW on EOS-padded `(N, L, 2)` sequences |
 
 ### `Population`
 

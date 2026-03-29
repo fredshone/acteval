@@ -13,7 +13,8 @@ domains: participations, transitions, and timing (equal weight each).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from functools import partial
 from typing import Callable
 
 import numpy as np
@@ -114,7 +115,7 @@ def _normalize_columns(matrix: ndarray) -> ndarray:
 
 
 # ---------------------------------------------------------------------------
-# Distance functions: (N, F) matrix → (N, N) distance matrix
+# Distance functions: (N, ...) feature array → (N, N) distance matrix
 # ---------------------------------------------------------------------------
 
 
@@ -158,8 +159,64 @@ def _pairwise_hamming(matrix: ndarray, chunk_size: int = 50) -> ndarray:
     return dist / f
 
 
+def _pairwise_chamfer(array: ndarray, chunk_size: int) -> ndarray:
+    """Compute NxN pairwise Chamfer distance from an ``(N, L, 2)`` feature array.
+
+    Each person is treated as a set of L 2D points ``[act_code, duration]``.
+    Chamfer(A, B) is the mean of the minimum distances A→B and B→A, divided by
+    2. Both feature axes are normalised to [0, 1], so the maximum Euclidean
+    distance between any two points is √2; dividing by √2 gives a [0, 1] bound.
+
+    ``chunk_size`` is accepted for interface consistency but unused here.
+    """
+    from scipy.spatial.distance import cdist
+
+    n = array.shape[0]
+    dist = np.zeros((n, n), dtype=np.float64)
+    for i in range(n):
+        for j in range(i + 1, n):
+            D = cdist(array[i], array[j])
+            d = (D.min(axis=1).mean() + D.min(axis=0).mean()) / 2
+            dist[i, j] = dist[j, i] = d
+    return dist / np.sqrt(2)
+
+
+def _pairwise_soft_dtw(array: ndarray, chunk_size: int, gamma: float = 1.0) -> ndarray:
+    """Compute NxN pairwise soft-DTW distance from an ``(N, L, 2)`` feature array.
+
+    Each person is treated as a sequence of L 2D vectors ``[act_code, duration]``.
+    Raw soft-DTW values are unbounded; they are normalised to [0, 1] using:
+
+        distance(a, b) = 1 − sdtw(a, b) / √(sdtw(a, a) · sdtw(b, b))
+
+    (Cuturi & Blondel 2017). The result is clipped to [0, 1] and the diagonal
+    is zeroed.
+
+    Args:
+        array: ``(N, L, 2)`` feature array from :func:`_sequence_feature_matrix`.
+        chunk_size: Accepted for interface consistency but unused.
+        gamma: Soft-DTW smoothing parameter. Smaller values approach hard DTW.
+    """
+    from tslearn.metrics import soft_dtw
+
+    n = array.shape[0]
+    raw = np.zeros((n, n), dtype=np.float64)
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = soft_dtw(array[i], array[j], gamma=gamma)
+            raw[i, j] = raw[j, i] = d
+
+    self_sim = np.array([soft_dtw(array[i], array[i], gamma=gamma) for i in range(n)])
+    denom = np.sqrt(self_sim[:, None] * self_sim[None, :])
+    with np.errstate(invalid="ignore"):
+        dist = 1.0 - raw / denom
+    dist = np.clip(dist, 0.0, 1.0)
+    np.fill_diagonal(dist, 0.0)
+    return dist
+
+
 # ---------------------------------------------------------------------------
-# Feature matrix wrappers: Population → (N, F) normalised matrix
+# Feature array wrappers: Population → (N, ...) normalised array
 # ---------------------------------------------------------------------------
 
 
@@ -181,6 +238,33 @@ def _timing_feature_matrix(pop: Population) -> ndarray:
     return _normalize_columns(matrix)
 
 
+def _sequence_feature_matrix(pop: Population, max_len: int = 12) -> ndarray:
+    """Return an ``(N, max_len, 2)`` EOS-padded sequence array.
+
+    Each person's episodes are encoded as rows of
+    ``[normalised_act_code, normalised_duration]`` up to ``max_len``.
+    Episodes beyond ``max_len`` are silently truncated. Positions beyond the
+    person's actual length are filled with an EOS token:
+    ``act = 1.0`` (one past the valid range), ``duration = 0.0``.
+
+    Normalisation:
+      ``act_code  → act_code / n_act_types``  (range ``[0, 1)``, EOS = ``1.0``)
+      ``duration  → duration / 1440.0``       (range ``[0, 1]``)
+    """
+    n = pop.n
+    n_acts = pop.n_act_types
+    out = np.zeros((n, max_len, 2), dtype=np.float64)
+    out[:, :, 0] = 1.0  # default all act slots to EOS
+
+    for i in range(n):
+        s, e = pop.pid_starts[i], pop.pid_ends[i]
+        length = min(e - s, max_len)
+        out[i, :length, 0] = pop.act_codes[s : s + length] / n_acts
+        out[i, :length, 1] = pop.durations[s : s + length] / 1440.0
+
+    return out
+
+
 # ---------------------------------------------------------------------------
 # PairwiseSpec
 # ---------------------------------------------------------------------------
@@ -192,13 +276,14 @@ class PairwiseSpec:
 
     Attributes:
         name: Label for this distance component (e.g. ``"participations"``).
-        feature_fn: Extracts a normalised ``(N, F)`` feature matrix from a
-            :class:`~acteval.population.Population`.
+        feature_fn: Extracts a ``(N, ...)`` feature array from a
+            :class:`~acteval.population.Population`. The first dimension is
+            always N (number of persons); remaining dimensions are
+            spec-specific. Specs with an empty trailing shape are skipped.
         distance_fn: Computes an ``(N, N)`` distance matrix from the feature
-            matrix. Signature: ``(matrix, chunk_size) -> ndarray``.
+            array. Signature: ``(array, chunk_size) -> ndarray``.
         weight: Contribution weight when aggregating multiple specs into the
-            final combined matrix. Specs with no features (``F == 0``) are
-            skipped regardless of weight.
+            final combined matrix.
     """
 
     name: str
@@ -223,6 +308,47 @@ def default_pairwise_specs() -> list[PairwiseSpec]:
         PairwiseSpec("transitions", _transition_feature_matrix, _pairwise_mae),
         PairwiseSpec("timing", _timing_feature_matrix, _pairwise_mae),
     ]
+
+
+def chamfer_spec(max_len: int = 12, weight: float = 1.0) -> PairwiseSpec:
+    """Return a :class:`PairwiseSpec` using Chamfer distance on padded sequences.
+
+    Each person is represented as a set of ``max_len`` 2D points
+    ``[normalised_act_code, normalised_duration]``, EOS-padded. See
+    :func:`_sequence_feature_matrix` and :func:`_pairwise_chamfer`.
+
+    Args:
+        max_len: Maximum sequence length (episodes beyond this are truncated).
+        weight: Aggregation weight (see :class:`PairwiseSpec`).
+    """
+    return PairwiseSpec(
+        name="chamfer",
+        feature_fn=partial(_sequence_feature_matrix, max_len=max_len),
+        distance_fn=_pairwise_chamfer,
+        weight=weight,
+    )
+
+
+def soft_dtw_spec(
+    max_len: int = 12, gamma: float = 1.0, weight: float = 1.0
+) -> PairwiseSpec:
+    """Return a :class:`PairwiseSpec` using soft-DTW distance on padded sequences.
+
+    Each person is represented as a sequence of ``max_len`` 2D vectors
+    ``[normalised_act_code, normalised_duration]``, EOS-padded. See
+    :func:`_sequence_feature_matrix` and :func:`_pairwise_soft_dtw`.
+
+    Args:
+        max_len: Maximum sequence length (episodes beyond this are truncated).
+        gamma: Soft-DTW smoothing parameter (smaller → harder alignment).
+        weight: Aggregation weight (see :class:`PairwiseSpec`).
+    """
+    return PairwiseSpec(
+        name="soft_dtw",
+        feature_fn=partial(_sequence_feature_matrix, max_len=max_len),
+        distance_fn=partial(_pairwise_soft_dtw, gamma=gamma),
+        weight=weight,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -307,10 +433,10 @@ def pairwise_distances(
     total_weight = 0.0
 
     for spec in specs:
-        feat_matrix = spec.feature_fn(pop)
-        if feat_matrix.shape[1] == 0:
+        feat_array = spec.feature_fn(pop)
+        if np.prod(feat_array.shape[1:]) == 0:
             continue
-        dist = spec.distance_fn(feat_matrix, chunk_size)
+        dist = spec.distance_fn(feat_array, chunk_size)
         weighted_sum += spec.weight * dist
         total_weight += spec.weight
 

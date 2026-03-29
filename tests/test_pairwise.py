@@ -8,13 +8,18 @@ from acteval.pairwise import (
     _extract_feature_matrix,
     _mean_duration_per_act_per_pid,
     _normalize_columns,
+    _pairwise_chamfer,
     _pairwise_hamming,
     _pairwise_mae,
+    _pairwise_soft_dtw,
     _participation_feature_matrix,
+    _sequence_feature_matrix,
     _timing_feature_matrix,
     _transition_feature_matrix,
+    chamfer_spec,
     default_pairwise_specs,
     pairwise_distances,
+    soft_dtw_spec,
 )
 from acteval.population import Population
 
@@ -384,3 +389,132 @@ def test_pairwise_weights(three_schedules):
     )
     expected = (part_result.matrix * 1 + timing_result.matrix * 2) / 3
     np.testing.assert_array_almost_equal(combined.matrix, expected)
+
+
+# ---------------------------------------------------------------------------
+# Tests: _sequence_feature_matrix
+# ---------------------------------------------------------------------------
+
+
+def test_sequence_feature_matrix_shape(three_schedules):
+    pop = Population(three_schedules)
+    out = _sequence_feature_matrix(pop, max_len=12)
+    assert out.shape == (3, 12, 2)
+
+
+def test_sequence_feature_matrix_custom_max_len(three_schedules):
+    pop = Population(three_schedules)
+    out = _sequence_feature_matrix(pop, max_len=5)
+    assert out.shape == (3, 5, 2)
+
+
+def test_sequence_feature_matrix_eos_padding():
+    """Person with 1 episode should have EOS tokens in remaining positions."""
+    df = DataFrame(
+        [
+            {"pid": 0, "act": "home", "start": 0, "end": 24, "duration": 24},
+            {"pid": 1, "act": "home", "start": 0, "end": 8, "duration": 8},
+            {"pid": 1, "act": "work", "start": 8, "end": 24, "duration": 16},
+        ]
+    )
+    pop = Population(df)
+    out = _sequence_feature_matrix(pop, max_len=4)
+    # pid 0 has 1 episode → positions 1,2,3 should be EOS (act=1.0, dur=0.0)
+    pid0_idx = 0  # Population dense-encodes pids in order of first appearance
+    np.testing.assert_array_equal(out[pid0_idx, 1:, 0], np.ones(3))  # EOS act
+    np.testing.assert_array_equal(out[pid0_idx, 1:, 1], np.zeros(3))  # EOS dur
+
+
+def test_sequence_feature_matrix_normalisation(three_schedules):
+    pop = Population(three_schedules)
+    out = _sequence_feature_matrix(pop, max_len=12)
+    acts = out[:, :, 0]
+    durs = out[:, :, 1]
+    assert acts.min() >= 0.0
+    assert acts.max() <= 1.0
+    assert durs.min() >= 0.0
+    assert durs.max() <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Tests: _pairwise_chamfer
+# ---------------------------------------------------------------------------
+
+
+def test_chamfer_zero_diagonal(three_schedules):
+    pop = Population(three_schedules)
+    arr = _sequence_feature_matrix(pop)
+    dist = _pairwise_chamfer(arr, chunk_size=50)
+    np.testing.assert_array_almost_equal(np.diag(dist), np.zeros(3))
+
+
+def test_chamfer_symmetry(three_schedules):
+    pop = Population(three_schedules)
+    arr = _sequence_feature_matrix(pop)
+    dist = _pairwise_chamfer(arr, chunk_size=50)
+    np.testing.assert_array_almost_equal(dist, dist.T)
+
+
+def test_chamfer_values_in_range(three_schedules):
+    pop = Population(three_schedules)
+    arr = _sequence_feature_matrix(pop)
+    dist = _pairwise_chamfer(arr, chunk_size=50)
+    assert dist.min() >= -1e-9
+    assert dist.max() <= 1 + 1e-9
+
+
+def test_chamfer_known_value():
+    """Two persons with entirely different activities should have distance > 0."""
+    df = DataFrame(
+        [
+            {"pid": 0, "act": "home", "start": 0, "end": 24, "duration": 24},
+            {"pid": 1, "act": "work", "start": 0, "end": 24, "duration": 24},
+        ]
+    )
+    pop = Population(df)
+    arr = _sequence_feature_matrix(pop)
+    dist = _pairwise_chamfer(arr, chunk_size=50)
+    assert dist[0, 1] > 0.0
+
+
+def test_chamfer_spec_end_to_end(three_schedules):
+    result = pairwise_distances(three_schedules, specs=[chamfer_spec()])
+    assert result.matrix.shape == (3, 3)
+    np.testing.assert_array_almost_equal(np.diag(result.matrix), np.zeros(3))
+    assert result.matrix.min() >= -1e-9
+    assert result.matrix.max() <= 1 + 1e-9
+
+
+# ---------------------------------------------------------------------------
+# Tests: _pairwise_soft_dtw
+# ---------------------------------------------------------------------------
+
+
+def test_soft_dtw_zero_diagonal(three_schedules):
+    pop = Population(three_schedules)
+    arr = _sequence_feature_matrix(pop)
+    dist = _pairwise_soft_dtw(arr, chunk_size=50)
+    np.testing.assert_array_almost_equal(np.diag(dist), np.zeros(3))
+
+
+def test_soft_dtw_symmetry(three_schedules):
+    pop = Population(three_schedules)
+    arr = _sequence_feature_matrix(pop)
+    dist = _pairwise_soft_dtw(arr, chunk_size=50)
+    np.testing.assert_array_almost_equal(dist, dist.T)
+
+
+def test_soft_dtw_values_in_range(three_schedules):
+    pop = Population(three_schedules)
+    arr = _sequence_feature_matrix(pop)
+    dist = _pairwise_soft_dtw(arr, chunk_size=50)
+    assert dist.min() >= -1e-9
+    assert dist.max() <= 1 + 1e-9
+
+
+def test_soft_dtw_spec_end_to_end(three_schedules):
+    result = pairwise_distances(three_schedules, specs=[soft_dtw_spec()])
+    assert result.matrix.shape == (3, 3)
+    np.testing.assert_array_almost_equal(np.diag(result.matrix), np.zeros(3))
+    assert result.matrix.min() >= -1e-9
+    assert result.matrix.max() <= 1 + 1e-9
