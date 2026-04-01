@@ -23,7 +23,7 @@ def _synthetic():
 
 
 def test_timing_distance_for_absent_activity_is_one():
-    result = compare(_observed(), {"m": _synthetic()}, report_stats=False)
+    result = compare(_observed(), {"m": _synthetic()})
     dists = result["distances"]
     timing_dists = dists.xs("timing", level="domain")
     start_dists = timing_dists.xs("start times", level="feature")
@@ -35,7 +35,7 @@ def test_timing_distance_for_absent_activity_is_one():
 def test_timing_description_for_absent_activity_is_zero():
     # After weighted aggregation, absent activities have zero weight so their
     # description collapses to 0.0 (not NaN) in the aggregated output.
-    result = compare(_observed(), {"m": _synthetic()}, report_stats=False)
+    result = compare(_observed(), {"m": _synthetic()})
     descs = result["descriptions"]
     timing_descs = descs.xs("timing", level="domain")
     start_descs = timing_descs.xs("start times", level="feature")
@@ -45,7 +45,7 @@ def test_timing_description_for_absent_activity_is_zero():
 
 
 def test_participation_rate_distance_for_absent_activity_not_one():
-    result = compare(_observed(), {"m": _synthetic()}, report_stats=False)
+    result = compare(_observed(), {"m": _synthetic()})
     dists = result["distances"]
     part_dists = dists.xs("participations", level="domain")
     rate_dists = part_dists.xs("participation rate", level="feature")

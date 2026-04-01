@@ -50,6 +50,7 @@ from acteval._aggregation import (
     distance_weighted_average,
     weighted_average,
 )
+from acteval._result_frame import ResultFrame
 from acteval.features import creativity, structural
 from acteval._jobs import JobSpec
 from acteval.population import Population
@@ -63,12 +64,26 @@ def add_stats(data: DataFrame, columns: dict[str, DataFrame]):
 def _aggregate_features(
     descriptions: DataFrame, distances: DataFrame
 ) -> tuple[DataFrame, DataFrame]:
-    """Tier 1: collapse per-segment rows into one row per (domain, feature, segment)."""
+    """Tier 1: collapse per-segment rows into one row per (domain, feature, segment).
+
+    Uses ``ResultFrame`` internally to avoid fragile suffix-based column
+    filtering; the returned DataFrames preserve the existing schema
+    (values + unit, no weight columns).
+    """
     grouper = ["domain", "feature", "segment"]
-    feat_desc = descriptions.drop("unit", axis=1).groupby(grouper).apply(weighted_average)
-    feat_desc["unit"] = descriptions["unit"].groupby(grouper).first()
-    feat_dist = distances.drop("unit", axis=1).groupby(grouper).apply(distance_weighted_average)
+
+    desc_rf = ResultFrame.from_wide(descriptions)
+    feat_desc_rf = desc_rf.aggregate(grouper)
+    feat_desc = feat_desc_rf.values.copy()
+    if feat_desc_rf.units is not None:
+        feat_desc["unit"] = feat_desc_rf.units
+
+    dist_rf = ResultFrame.from_wide(distances)
+    feat_dist_rf = dist_rf.aggregate_distances(grouper)
+    feat_dist = feat_dist_rf.values.copy()
+    # unit comes from descriptions (distances have no observed description values)
     feat_dist["unit"] = descriptions["unit"].groupby(grouper).first()
+
     return feat_desc, feat_dist
 
 

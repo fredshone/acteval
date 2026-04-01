@@ -243,7 +243,7 @@ def test_compare_splits_runs():
         synthetic_attributes={"m": synth_attrs},
         target_attributes=target_attrs,
         split_on=["gender"],
-        report_stats=False,
+        
     )
     # Should have both base and label frames
     assert "descriptions" in result
@@ -256,7 +256,7 @@ def test_evaluator_compare_splits():
     result = evaluator.compare_populations(
         synthetic_schedules={"m": synthetic},
         synthetic_attributes={"m": synth_attrs},
-        report_stats=False,
+        
     )
     assert "descriptions" in result
     assert "label_group_distances" in result
@@ -271,7 +271,7 @@ def test_compare_splits_two_models():
         synthetic_attributes={"m1": synth_attrs, "m2": synth_attrs},
         target_attributes=target_attrs,
         split_on=["gender"],
-        report_stats=False,
+        
     )
     assert "descriptions" in result
     assert "label_group_distances" in result
@@ -286,7 +286,7 @@ def test_compare_population_and_report():
     observed, synthetic, target_attrs, synth_attrs = _split_data()
     evaluator = Evaluator(observed, target_attrs, ["gender"])
     evaluator.compare_population("m", synthetic, synth_attrs)
-    result = evaluator.report(report_stats=False)
+    result = evaluator.report()
     assert "descriptions" in result
     assert "label_group_distances" in result
 
@@ -295,7 +295,7 @@ def test_compare_population_no_attributes_no_splits():
     observed, synthetic, _, _ = _split_data()
     evaluator = Evaluator(observed)
     evaluator.compare_population("m", synthetic)
-    result = evaluator.report(report_stats=False)
+    result = evaluator.report()
     assert "descriptions" in result
 
 
@@ -304,12 +304,12 @@ def test_compare_population_matches_compare_splits():
     evaluator = Evaluator(observed, target_attrs, ["gender"])
 
     evaluator.compare_population("m", synthetic, synth_attrs)
-    manual_result = evaluator.report(report_stats=False)
+    manual_result = evaluator.report()
 
     split_result = evaluator.compare_populations(
         synthetic_schedules={"m": synthetic},
         synthetic_attributes={"m": synth_attrs},
-        report_stats=False,
+        
     )
 
     for key in split_result.keys():

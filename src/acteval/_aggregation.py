@@ -7,7 +7,9 @@ Provides two groups of functions:
    weighted statistics over a ``{key: (values, weights)}`` feature dict.
 
 2. **Multi-tier collapse** (formerly ``post_process.py``):
-   Collapse raw per-segment rows upward through the three output tiers:
+   Collapse raw per-segment rows upward through the three output tiers using
+   ``ResultFrame`` for clean value/weight/unit separation:
+
    - ``descriptions_to_group_level`` / ``distances_to_group_level``:
      ``(domain, feature, segment, ...)`` → ``(domain, feature, ...)``
    - ``descriptions_to_domain_level`` / ``distances_to_domain_level``:
@@ -15,16 +17,24 @@ Provides two groups of functions:
 
    The optional ``extra`` parameter appends additional index levels to the
    grouper — use ``extra=["label"]`` for split-stratified aggregation.
+
+   Pass ``drop=None`` (or ``drop=[]``) to skip the feature-drop step; supply
+   your own list of ``(domain, feature, segment, ...)`` tuples to override the
+   defaults.
 """
 import numpy as np
 from numpy import ndarray
 from pandas import DataFrame, Series
 
-# ---------------------------------------------------------------------------
-# Hardcoded drop-lists for feasibility sub-features
-# ---------------------------------------------------------------------------
+from acteval._result_frame import ResultFrame
 
-_REMOVE_FEATURES = [
+# ---------------------------------------------------------------------------
+# Default drop-lists for feasibility sub-features
+# ---------------------------------------------------------------------------
+# These are the *defaults* for the tier-collapse functions below.  Pass a
+# different list (or ``None``) to override per call.
+
+DEFAULT_REMOVE_FEATURES: list[tuple] = [
     ("feasibility", "not home based", "starts"),
     ("feasibility", "not home based", "ends"),
     ("feasibility", "consecutive", "home"),
@@ -32,13 +42,23 @@ _REMOVE_FEATURES = [
     ("feasibility", "consecutive", "education"),
 ]
 
-_REMOVE_GROUPS = [
+DEFAULT_REMOVE_GROUPS: list[tuple] = [
     ("feasibility", "not home based"),
     ("feasibility", "consecutive"),
 ]
 
+# Backward-compatible aliases (keep old names importable).
+_REMOVE_FEATURES = DEFAULT_REMOVE_FEATURES
+_REMOVE_GROUPS = DEFAULT_REMOVE_GROUPS
+
 
 def _drop_features(df: DataFrame, features: list[tuple]) -> DataFrame:
+    """Drop rows from *df* whose index prefix matches any entry in *features*.
+
+    .. deprecated::
+        Use ``ResultFrame.drop_rows()`` instead.  This function is kept for
+        any callers that still operate on plain DataFrames.
+    """
     sorted_df = df.sort_index()
     if not features:
         return df
@@ -51,7 +71,7 @@ def _drop_features(df: DataFrame, features: list[tuple]) -> DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Weighted aggregation helpers
+# Weighted aggregation helpers (kept for backward compatibility)
 # ---------------------------------------------------------------------------
 
 
@@ -123,45 +143,112 @@ def average2d(features: dict[str, tuple[ndarray, ndarray]]) -> Series:
 
 
 # ---------------------------------------------------------------------------
-# Multi-tier collapse (formerly post_process.py)
+# Multi-tier collapse
 # ---------------------------------------------------------------------------
 
 
 def descriptions_to_group_level(
-    descriptions: DataFrame | Series, extra: list[str] = []
-) -> DataFrame | Series:
-    """Aggregate feature-level descriptions to group level (domain, feature)."""
+    descriptions: DataFrame | ResultFrame,
+    extra: list[str] = [],
+    drop: list[tuple] | None = DEFAULT_REMOVE_FEATURES,
+) -> DataFrame:
+    """Aggregate feature-level descriptions to group level (domain, feature).
+
+    Args:
+        descriptions: Wide-format DataFrame or ``ResultFrame`` at the segment level.
+        extra: Additional index levels to preserve (e.g. ``["label"]``).
+        drop: Index prefix tuples to exclude before aggregating.
+              Defaults to ``DEFAULT_REMOVE_FEATURES``.  Pass ``None`` or ``[]``
+              to skip filtering.
+    """
     grouper = ["domain", "feature"] + extra
-    desc = _drop_features(descriptions.drop("unit", axis=1), _REMOVE_FEATURES)
-    group_desc = desc.groupby(grouper).apply(weighted_average)
-    group_desc["unit"] = descriptions["unit"].groupby(grouper).first()
-    return group_desc
+    rf = descriptions if isinstance(descriptions, ResultFrame) else ResultFrame.from_wide(descriptions)
+    if drop:
+        rf = rf.drop_rows(drop)
+    group_rf = rf.aggregate(grouper)
+    out = group_rf.values.copy()
+    if group_rf.units is not None:
+        out["unit"] = group_rf.units
+    return out
 
 
 def distances_to_group_level(
-    distances: DataFrame | Series, extra: list[str] = []
-) -> DataFrame | Series:
-    """Aggregate feature-level distances to group level (domain, feature)."""
+    distances: DataFrame | ResultFrame,
+    extra: list[str] = [],
+    drop: list[tuple] | None = DEFAULT_REMOVE_FEATURES,
+) -> DataFrame:
+    """Aggregate feature-level distances to group level (domain, feature).
+
+    Args:
+        distances: Wide-format DataFrame or ``ResultFrame`` at the segment level.
+        extra: Additional index levels to preserve (e.g. ``["label"]``).
+        drop: Index prefix tuples to exclude before aggregating.
+              Defaults to ``DEFAULT_REMOVE_FEATURES``.  Pass ``None`` or ``[]``
+              to skip filtering.
+    """
     grouper = ["domain", "feature"] + extra
-    dist = _drop_features(distances.drop("unit", axis=1), _REMOVE_FEATURES)
-    group_dist = dist.groupby(grouper).apply(distance_weighted_average)
-    group_dist["unit"] = distances["unit"].groupby(grouper).first()
-    return group_dist
+    rf = distances if isinstance(distances, ResultFrame) else ResultFrame.from_wide(distances)
+    if drop:
+        rf = rf.drop_rows(drop)
+    group_rf = rf.aggregate_distances(grouper)
+    out = group_rf.values.copy()
+    if group_rf.units is not None:
+        out["unit"] = group_rf.units
+    return out
 
 
 def descriptions_to_domain_level(
-    group_descriptions: DataFrame | Series, extra: list[str] = []
-) -> DataFrame | Series:
-    """Aggregate group-level descriptions to domain level."""
+    group_descriptions: DataFrame | ResultFrame,
+    extra: list[str] = [],
+    drop: list[tuple] | None = DEFAULT_REMOVE_GROUPS,
+) -> DataFrame:
+    """Aggregate group-level descriptions to domain level.
+
+    Uses an unweighted mean so that each feature group contributes equally.
+
+    Args:
+        group_descriptions: Wide-format DataFrame or ``ResultFrame`` at group level.
+        extra: Additional index levels to preserve (e.g. ``["label"]``).
+        drop: Index prefix tuples to exclude before aggregating.
+              Defaults to ``DEFAULT_REMOVE_GROUPS``.  Pass ``None`` or ``[]``
+              to skip filtering.
+    """
     grouper = ["domain"] + extra
-    domain_desc = _drop_features(group_descriptions.drop("unit", axis=1), _REMOVE_GROUPS)
-    return domain_desc.groupby(grouper).mean()
+    rf = (
+        group_descriptions
+        if isinstance(group_descriptions, ResultFrame)
+        else ResultFrame.from_wide(group_descriptions)
+    )
+    if drop:
+        rf = rf.drop_rows(drop)
+    domain_rf = rf.mean(grouper)
+    # Domain level has no unit column — return values only (matching existing behaviour).
+    return domain_rf.values
 
 
 def distances_to_domain_level(
-    group_distances: DataFrame | Series, extra: list[str] = []
-) -> DataFrame | Series:
-    """Aggregate group-level distances to domain level."""
+    group_distances: DataFrame | ResultFrame,
+    extra: list[str] = [],
+    drop: list[tuple] | None = DEFAULT_REMOVE_GROUPS,
+) -> DataFrame:
+    """Aggregate group-level distances to domain level.
+
+    Uses an unweighted mean so that each feature group contributes equally.
+
+    Args:
+        group_distances: Wide-format DataFrame or ``ResultFrame`` at group level.
+        extra: Additional index levels to preserve (e.g. ``["label"]``).
+        drop: Index prefix tuples to exclude before aggregating.
+              Defaults to ``DEFAULT_REMOVE_GROUPS``.  Pass ``None`` or ``[]``
+              to skip filtering.
+    """
     grouper = ["domain"] + extra
-    domain_dist = _drop_features(group_distances.drop("unit", axis=1), _REMOVE_GROUPS)
-    return domain_dist.groupby(grouper).mean()
+    rf = (
+        group_distances
+        if isinstance(group_distances, ResultFrame)
+        else ResultFrame.from_wide(group_distances)
+    )
+    if drop:
+        rf = rf.drop_rows(drop)
+    domain_rf = rf.mean(grouper)
+    return domain_rf.values

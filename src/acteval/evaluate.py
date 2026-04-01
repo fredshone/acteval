@@ -1,4 +1,5 @@
 import warnings
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -13,18 +14,13 @@ from acteval._pipeline import (
     _observed_base,
     _observed_base_creativity,
     _observed_base_structural,
-    add_stats,
 )
 from acteval._splits import (
     _get_density_jobs,
     _key_activities,
 )
-from acteval._aggregation import (
-    descriptions_to_domain_level,
-    descriptions_to_group_level,
-    distances_to_domain_level,
-    distances_to_group_level,
-)
+from acteval._aggregation import DEFAULT_REMOVE_FEATURES, DEFAULT_REMOVE_GROUPS
+from acteval._result_frame import ResultFrame
 from acteval.features import creativity, structural
 from acteval._compat import _coerce_to_pandas, _is_dataframe
 from acteval._jobs import get_jobs
@@ -32,81 +28,174 @@ from acteval.population import Population
 
 
 class EvalResult:
-    """Wrapper around the dict of result DataFrames returned by ``Evaluator.compare``.
+    """Stores raw segment-level data; computes three-tier aggregation on demand.
 
-    Provides named attribute access, backward-compatible dict access, and
-    convenience methods for model ranking and summarisation.
+    Use ``aggregate()`` to get the full set of output DataFrames, or access
+    named properties (``descriptions``, ``domain_distances``, etc.) which call
+    ``aggregate()`` with default parameters.
+
+    Use ``save(path)`` to write all frames to CSV files.
     """
 
-    def __init__(self, frames: dict[str, DataFrame]):
-        self._frames = frames
+    def __init__(self, raw_desc: DataFrame, raw_dist: DataFrame):
+        self._raw_desc = raw_desc   # (domain, feature, segment, label, cat) wide
+        self._raw_dist = raw_dist
 
-    # --- named properties ---
+    # --- raw access ---
+
+    @property
+    def raw(self) -> dict[str, ResultFrame]:
+        """Pre-aggregation data as ``ResultFrame`` objects (desc + dist)."""
+        return {
+            "descriptions": ResultFrame.from_wide(self._raw_desc),
+            "distances": ResultFrame.from_wide(self._raw_dist),
+        }
+
+    # --- on-demand aggregation ---
+
+    def aggregate(
+        self,
+        drop_features: list[tuple] | None = DEFAULT_REMOVE_FEATURES,
+        drop_groups: list[tuple] | None = DEFAULT_REMOVE_GROUPS,
+    ) -> dict[str, DataFrame]:
+        """Compute all output tiers from raw segment-level data.
+
+        Args:
+            drop_features: Segment-level rows to drop before group aggregation.
+                Defaults to ``DEFAULT_REMOVE_FEATURES``.  Pass ``None`` or ``[]``
+                to skip filtering.
+            drop_groups: Group-level rows to drop before domain aggregation.
+                Defaults to ``DEFAULT_REMOVE_GROUPS``.  Pass ``None`` or ``[]``
+                to skip filtering.
+
+        Returns:
+            Dict with keys: ``descriptions``, ``distances``,
+            ``group_descriptions``, ``group_distances``,
+            ``domain_descriptions``, ``domain_distances``.
+            When real attribute splits were used, also includes ``label_*``
+            variants of each key.
+        """
+        from acteval._aggregation import (
+            descriptions_to_domain_level,
+            descriptions_to_group_level,
+            distances_to_domain_level,
+            distances_to_group_level,
+        )
+
+        feat_desc, feat_dist = _aggregate_features(self._raw_desc, self._raw_dist)
+        group_desc = descriptions_to_group_level(self._raw_desc, drop=drop_features)
+        group_dist = distances_to_group_level(self._raw_dist, drop=drop_features)
+        domain_desc = descriptions_to_domain_level(group_desc, drop=drop_groups)
+        domain_dist = distances_to_domain_level(group_dist, drop=drop_groups)
+
+        frames: dict[str, DataFrame] = {
+            "descriptions": feat_desc,
+            "distances": feat_dist,
+            "group_descriptions": group_desc,
+            "group_distances": group_dist,
+            "domain_descriptions": domain_desc,
+            "domain_distances": domain_dist,
+        }
+
+        # Include label_* only when real splits exist
+        has_labels = not (
+            self._raw_desc.index.get_level_values("label").unique().tolist() == ["__split__"]
+        )
+        if has_labels:
+            lg_desc = descriptions_to_group_level(self._raw_desc, extra=["label"], drop=drop_features)
+            lg_dist = distances_to_group_level(self._raw_dist, extra=["label"], drop=drop_features)
+            ld_desc = descriptions_to_domain_level(lg_desc, extra=["label"], drop=drop_groups)
+            ld_dist = distances_to_domain_level(lg_dist, extra=["label"], drop=drop_groups)
+            frames.update({
+                "label_descriptions": self._raw_desc,
+                "label_distances": self._raw_dist,
+                "label_group_descriptions": lg_desc,
+                "label_group_distances": lg_dist,
+                "label_domain_descriptions": ld_desc,
+                "label_domain_distances": ld_dist,
+            })
+
+        return frames
+
+    # --- named properties (call aggregate() with defaults) ---
 
     @property
     def descriptions(self) -> DataFrame:
-        return self._frames["descriptions"]
+        return self.aggregate()["descriptions"]
 
     @property
     def distances(self) -> DataFrame:
-        return self._frames["distances"]
+        return self.aggregate()["distances"]
 
     @property
     def group_descriptions(self) -> DataFrame:
-        return self._frames["group_descriptions"]
+        return self.aggregate()["group_descriptions"]
 
     @property
     def group_distances(self) -> DataFrame:
-        return self._frames["group_distances"]
+        return self.aggregate()["group_distances"]
 
     @property
     def domain_descriptions(self) -> DataFrame:
-        return self._frames["domain_descriptions"]
+        return self.aggregate()["domain_descriptions"]
 
     @property
     def domain_distances(self) -> DataFrame:
-        return self._frames["domain_distances"]
+        return self.aggregate()["domain_distances"]
 
     @property
     def label_descriptions(self) -> DataFrame | None:
-        return self._frames.get("label_descriptions")
+        return self.aggregate().get("label_descriptions")
 
     @property
     def label_distances(self) -> DataFrame | None:
-        return self._frames.get("label_distances")
+        return self.aggregate().get("label_distances")
 
     @property
     def label_group_descriptions(self) -> DataFrame | None:
-        return self._frames.get("label_group_descriptions")
+        return self.aggregate().get("label_group_descriptions")
 
     @property
     def label_group_distances(self) -> DataFrame | None:
-        return self._frames.get("label_group_distances")
+        return self.aggregate().get("label_group_distances")
 
     @property
     def label_domain_descriptions(self) -> DataFrame | None:
-        return self._frames.get("label_domain_descriptions")
+        return self.aggregate().get("label_domain_descriptions")
 
     @property
     def label_domain_distances(self) -> DataFrame | None:
-        return self._frames.get("label_domain_distances")
+        return self.aggregate().get("label_domain_distances")
 
     # --- dict-like interface (backward compat) ---
 
     def __getitem__(self, key: str) -> DataFrame:
-        return self._frames[key]
+        return self.aggregate()[key]
 
     def __iter__(self):
-        return iter(self._frames)
+        return iter(self.aggregate())
 
     def keys(self):
-        return self._frames.keys()
+        return self.aggregate().keys()
 
     def values(self):
-        return self._frames.values()
+        return self.aggregate().values()
 
     def items(self):
-        return self._frames.items()
+        return self.aggregate().items()
+
+    # --- persistence ---
+
+    def save(self, path: str | Path) -> None:
+        """Save all aggregated frames to CSV files in *path*.
+
+        Creates the directory if it does not exist.  One file per frame:
+        ``descriptions.csv``, ``distances.csv``, ``group_descriptions.csv``, etc.
+        """
+        out = Path(path)
+        out.mkdir(parents=True, exist_ok=True)
+        for name, frame in self.aggregate().items():
+            frame.to_csv(out / f"{name}.csv")
 
     # --- model introspection ---
 
@@ -324,48 +413,32 @@ class Evaluator:
         self,
         synthetic: dict[str, DataFrame],
         attributes: dict[str, DataFrame] | None = None,
-        report_stats: bool = True,
         verbose: bool = False,
     ) -> "EvalResult":
         """Compare synthetic populations against pre-computed target features.
 
-        When ``attributes`` is provided, delegates to ``compare_splits`` and
-        returns the full set of ``label_*`` output keys for per-split inspection.
-        Without ``attributes``, assigns every synthetic person to a single
-        category ``"all"`` and drops the ``label_*`` keys (which are only
-        meaningful when multiple split categories exist).
-
         Args:
             synthetic: ``{model_name: schedules_df}``.
             attributes: Optional ``{model_name: attributes_df}`` with ``pid``
-                column.  If provided, enables attribute-based splitting.
-            report_stats: Whether to append mean/std columns.
+                column.  If provided, enables attribute-based splitting and
+                exposes ``label_*`` frames on the result.
             verbose: Print progress for each (split, category) subset.
         """
         if attributes is not None:
             return self.compare_populations(
                 synthetic_schedules=synthetic,
                 synthetic_attributes=attributes,
-                report_stats=report_stats,
                 verbose=verbose,
             )
-        # Assign all synthetic persons to a single "__split__" = "all" category
-        # so compare_splits can run its generic (split, cat) loop with one iteration.
         synthetic = {m: _coerce_to_pandas(df) for m, df in synthetic.items()}
         synth_attrs = {
             m: DataFrame({"pid": df["pid"].unique(), "__split__": "all"})
             for m, df in synthetic.items()
         }
-        result = self.compare_populations(
+        return self.compare_populations(
             synthetic_schedules=synthetic,
             synthetic_attributes=synth_attrs,
-            report_stats=report_stats,
             verbose=verbose,
-        )
-        # Strip the label_* frames — they duplicate the top-level frames when
-        # there is only one split category.
-        return EvalResult(
-            {k: v for k, v in result.items() if not k.startswith("label_")}
         )
 
     def compare_population(
@@ -528,73 +601,28 @@ class Evaluator:
             [p for p in distance_parts if not p.empty]
         )
 
-    def report(self, report_stats: bool = False) -> EvalResult:
+    def report(self) -> EvalResult:
         """Assemble an ``EvalResult`` from previously accumulated model comparisons.
 
-        Call this after one or more ``compare_population`` calls to build the
-        final three-tier aggregated output.
-
-        Args:
-            report_stats: Whether to append mean/std columns.
+        Call this after one or more ``compare_population`` calls.
 
         Returns:
-            EvalResult with per-split and per-label summary DataFrames.
+            EvalResult wrapping the raw segment-level data.  Call
+            ``result.aggregate()`` or access named properties to get the
+            three-tier aggregated output.
         """
-        # Horizontal concat: observed base columns + one column block per model.
-        # The resulting DataFrames have a (domain, feature, segment, label, cat)
-        # MultiIndex on rows and {observed, model_a, model_b, ...} on columns.
         descriptions = concat(
             [self._base_desc] + list(self.collected_descriptions.values()), axis=1
         )
         distances = concat(
             [self._base_dist] + list(self.collected_distances.values()), axis=1
         )
-
-        # Three-tier aggregation: segment → feature → group → domain.
-        # The "label_*" variants keep the (label, cat) index levels so callers
-        # can inspect per-split results; the top-level variants collapse them.
-        feat_desc, feat_dist = _aggregate_features(descriptions, distances)
-        group_desc = descriptions_to_group_level(descriptions)
-        group_dist = distances_to_group_level(distances)
-        domain_desc = descriptions_to_domain_level(group_desc)
-        domain_dist = distances_to_domain_level(group_dist)
-        frames = {
-            "descriptions": feat_desc,
-            "distances": feat_dist,
-            "group_descriptions": group_desc,
-            "group_distances": group_dist,
-            "domain_descriptions": domain_desc,
-            "domain_distances": domain_dist,
-        }
-        label_group_desc = descriptions_to_group_level(descriptions, extra=["label"])
-        label_group_dist = distances_to_group_level(distances, extra=["label"])
-        label_domain_desc = descriptions_to_domain_level(
-            label_group_desc, extra=["label"]
-        )
-        label_domain_dist = distances_to_domain_level(label_group_dist, extra=["label"])
-        frames.update(
-            {
-                "label_descriptions": descriptions,
-                "label_distances": distances,
-                "label_group_descriptions": label_group_desc,
-                "label_group_distances": label_group_dist,
-                "label_domain_descriptions": label_domain_desc,
-                "label_domain_distances": label_domain_dist,
-            }
-        )
-
-        if report_stats:
-            columns = list(self.collected_descriptions.keys())
-            for frame in frames.values():
-                add_stats(data=frame, columns=columns)
-
-        return EvalResult(frames)
+        return EvalResult(raw_desc=descriptions, raw_dist=distances)
 
     def compare_populations(
         self,
         synthetic_schedules: dict[str, DataFrame],
         synthetic_attributes: dict[str, DataFrame],
-        report_stats: bool = True,
         verbose: bool = False,
     ) -> "EvalResult":
         """Compare synthetic populations against target, split by attribute categories.
@@ -605,11 +633,10 @@ class Evaluator:
         Args:
             synthetic_schedules: ``{model_name: schedules_df}``.
             synthetic_attributes: ``{model_name: attributes_df}`` with ``pid`` column.
-            report_stats: Whether to append mean/std columns.
             verbose: Print progress.
 
         Returns:
-            EvalResult with per-split and per-label summary DataFrames.
+            EvalResult wrapping raw segment-level data.
         """
         self.collected_descriptions = {}
         self.collected_distances = {}
@@ -621,14 +648,13 @@ class Evaluator:
                 verbose=verbose,
             )
 
-        return self.report(report_stats)
+        return self.report()
 
 
 def compare(
     observed: DataFrame,
     synthetic,
     attributes: dict[str, DataFrame] | None = None,
-    report_stats: bool = True,
     verbose: bool = False,
 ) -> EvalResult:
     """Compare observed and synthetic activity schedule populations.
@@ -637,18 +663,16 @@ def compare(
         observed: Observed schedules with columns pid, act, start, end, duration.
         synthetic: Single synthetic DataFrame or dict mapping model names to DataFrames.
         attributes: Optional ``{model_name: attributes_df}`` with ``pid`` column.
-            If provided, enables attribute-based splitting (returns ``label_*`` keys).
-        report_stats: Whether to append mean/std columns.
+            If provided, enables attribute-based splitting (exposes ``label_*`` frames).
         verbose: Print progress for each (split, category) subset.
 
     Returns:
-        EvalResult with descriptions, distances, and grouped variants.
+        EvalResult with raw segment-level data; use ``aggregate()`` or named
+        properties for the three-tier output.
     """
     if _is_dataframe(synthetic):
         synthetic = {"synthetic": synthetic}
-    return Evaluator(observed).compare(
-        synthetic, attributes=attributes, report_stats=report_stats, verbose=verbose
-    )
+    return Evaluator(observed).compare(synthetic, attributes=attributes, verbose=verbose)
 
 
 def compare_splits(
@@ -657,12 +681,11 @@ def compare_splits(
     synthetic_attributes: dict[str, DataFrame],
     target_attributes: DataFrame,
     split_on: list[str],
-    report_stats: bool = True,
     verbose: bool = False,
 ) -> EvalResult:
     """Compare observed and synthetic populations, split by attribute categories.
 
-    Convenience wrapper around ``Evaluator.compare_splits``.
+    Convenience wrapper around ``Evaluator.compare_populations``.
 
     Args:
         observed: Observed schedules with columns pid, act, start, end, duration.
@@ -670,16 +693,15 @@ def compare_splits(
         synthetic_attributes: ``{model_name: attributes_df}`` with ``pid`` column.
         target_attributes: Target attributes DataFrame with ``pid`` column.
         split_on: Attribute columns to split on.
-        report_stats: Whether to append mean/std columns.
         verbose: Print progress.
 
     Returns:
-        EvalResult with per-split and per-label summary DataFrames.
+        EvalResult with raw segment-level data; includes ``label_*`` frames
+        when real attribute splits are present.
     """
     evaluator = Evaluator(observed, target_attributes, split_on)
     return evaluator.compare_populations(
         synthetic_schedules=synthetic_schedules,
         synthetic_attributes=synthetic_attributes,
-        report_stats=report_stats,
         verbose=verbose,
     )
