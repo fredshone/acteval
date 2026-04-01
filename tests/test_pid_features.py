@@ -243,11 +243,10 @@ def test_compare_splits_runs():
         synthetic_attributes={"m": synth_attrs},
         target_attributes=target_attrs,
         split_on=["gender"],
-        
     )
-    # Should have both base and label frames
-    assert "descriptions" in result
-    assert "label_group_distances" in result
+    assert result.has_splits
+    assert result.features.combined.distances.index.names == ["domain", "feature", "segment"]
+    assert result.groups.by_attribute.distances.index.names == ["domain", "feature", "label"]
 
 
 def test_evaluator_compare_splits():
@@ -256,10 +255,9 @@ def test_evaluator_compare_splits():
     result = evaluator.compare_populations(
         synthetic_schedules={"m": synthetic},
         synthetic_attributes={"m": synth_attrs},
-        
     )
-    assert "descriptions" in result
-    assert "label_group_distances" in result
+    assert result.has_splits
+    assert result.groups.by_attribute.distances.index.names == ["domain", "feature", "label"]
 
 
 def test_compare_splits_two_models():
@@ -271,13 +269,10 @@ def test_compare_splits_two_models():
         synthetic_attributes={"m1": synth_attrs, "m2": synth_attrs},
         target_attributes=target_attrs,
         split_on=["gender"],
-        
     )
-    assert "descriptions" in result
-    assert "label_group_distances" in result
-    # Both models should appear as columns
-    for frame in result.values():
-        cols = list(frame.columns)
+    assert result.has_splits
+    for view in (result.features, result.groups, result.domains):
+        cols = list(view.combined.distances.columns)
         assert any("m1" in c for c in cols), f"m1 missing from {cols}"
         assert any("m2" in c for c in cols), f"m2 missing from {cols}"
 
@@ -287,8 +282,8 @@ def test_compare_population_and_report():
     evaluator = Evaluator(observed, target_attrs, ["gender"])
     evaluator.compare_population("m", synthetic, synth_attrs)
     result = evaluator.report()
-    assert "descriptions" in result
-    assert "label_group_distances" in result
+    assert result.has_splits
+    assert result.groups.by_attribute.distances.index.names == ["domain", "feature", "label"]
 
 
 def test_compare_population_no_attributes_no_splits():
@@ -296,7 +291,8 @@ def test_compare_population_no_attributes_no_splits():
     evaluator = Evaluator(observed)
     evaluator.compare_population("m", synthetic)
     result = evaluator.report()
-    assert "descriptions" in result
+    assert not result.has_splits
+    assert "m" in result.features.combined.distances.columns
 
 
 def test_compare_population_matches_compare_splits():
@@ -309,11 +305,16 @@ def test_compare_population_matches_compare_splits():
     split_result = evaluator.compare_populations(
         synthetic_schedules={"m": synthetic},
         synthetic_attributes={"m": synth_attrs},
-        
     )
 
-    for key in split_result.keys():
-        assert manual_result[key].equals(split_result[key]), f"Mismatch in {key}"
+    for getter in (
+        lambda r: r.features.combined.distances,
+        lambda r: r.groups.combined.distances,
+        lambda r: r.domains.combined.distances,
+        lambda r: r.groups.by_attribute.distances,
+        lambda r: r.domains.by_attribute.distances,
+    ):
+        assert getter(manual_result).equals(getter(split_result))
 
 
 def test_unique_pids_original_stored():

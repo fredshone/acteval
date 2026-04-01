@@ -1,5 +1,11 @@
-__all__ = ["EvalResult", "Evaluator", "Population", "PairwiseResult", "compare", "compare_splits", "list_features", "pairwise_distances"]
+__all__ = ["AggregatedResult", "EvalResult", "Evaluator", "Population", "PairwiseResult", "SplitNotAvailableError", "compare", "compare_splits", "list_features", "pairwise_distances"]
 
+from acteval.evaluate import (
+    AggregatedResult as AggregatedResult,
+)
+from acteval.evaluate import (
+    SplitNotAvailableError as SplitNotAvailableError,
+)
 from acteval.evaluate import (
     EvalResult as EvalResult,
 )

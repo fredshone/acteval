@@ -62,15 +62,21 @@ def add_stats(data: DataFrame, columns: dict[str, DataFrame]):
 
 
 def _aggregate_features(
-    descriptions: DataFrame, distances: DataFrame
+    descriptions: DataFrame,
+    distances: DataFrame,
+    extra: list[str] = [],
 ) -> tuple[DataFrame, DataFrame]:
-    """Tier 1: collapse per-segment rows into one row per (domain, feature, segment).
+    """Tier 1: collapse per-segment rows into one row per (domain, feature, segment[, ...]).
 
     Uses ``ResultFrame`` internally to avoid fragile suffix-based column
     filtering; the returned DataFrames preserve the existing schema
     (values + unit, no weight columns).
+
+    Args:
+        extra: Additional index levels to preserve after aggregation,
+            e.g. ``["label"]`` or ``["label", "cat"]`` for split-aware output.
     """
-    grouper = ["domain", "feature", "segment"]
+    grouper = ["domain", "feature", "segment"] + extra
 
     desc_rf = ResultFrame.from_wide(descriptions)
     feat_desc_rf = desc_rf.aggregate(grouper)
@@ -82,7 +88,7 @@ def _aggregate_features(
     feat_dist_rf = dist_rf.aggregate_distances(grouper)
     feat_dist = feat_dist_rf.values.copy()
     # unit comes from descriptions (distances have no observed description values)
-    feat_dist["unit"] = descriptions["unit"].groupby(grouper).first()
+    feat_dist["unit"] = descriptions["unit"].groupby(level=grouper).first()
 
     return feat_desc, feat_dist
 

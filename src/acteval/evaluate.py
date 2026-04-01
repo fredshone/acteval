@@ -1,5 +1,7 @@
 import warnings
+from functools import cached_property
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -27,14 +29,143 @@ from acteval._jobs import get_jobs
 from acteval.population import Population
 
 
+class SplitNotAvailableError(AttributeError):
+    """Raised when ``.by_attribute`` or ``.by_category`` is accessed on an
+    ``EvalResult`` produced without ``split_on``."""
+
+
+class AggregatedResult:
+    """A pair of descriptions and distances DataFrames at one aggregation level.
+
+    Returned by ``ScheduleView.combined``, ``.by_attribute``, and ``.by_category``.
+    """
+
+    def __init__(
+        self,
+        descriptions: DataFrame,
+        distances: DataFrame,
+        _label: str = "",
+    ):
+        self.descriptions = descriptions
+        self.distances = distances
+        self._label = _label
+
+    def __repr__(self) -> str:
+        header = f"AggregatedResult [{self._label}]" if self._label else "AggregatedResult"
+        return f"{header}\n\n{self.distances.to_string()}"
+
+    def save(self, path: str | Path) -> None:
+        """Write ``descriptions.csv`` and ``distances.csv`` to *path*."""
+        out = Path(path)
+        out.mkdir(parents=True, exist_ok=True)
+        self.descriptions.to_csv(out / "descriptions.csv")
+        self.distances.to_csv(out / "distances.csv")
+
+
+class ScheduleView:
+    """Accessor for one schedule aggregation level (features / groups / domains).
+
+    Access ``.combined``, ``.by_attribute``, or ``.by_category`` to get an
+    ``AggregatedResult``.  Split-based views raise ``SplitNotAvailableError``
+    when the parent ``EvalResult`` was produced without ``split_on``.
+    """
+
+    def __init__(
+        self,
+        raw_desc: DataFrame,
+        raw_dist: DataFrame,
+        schedule: Literal["features", "groups", "domains"],
+        has_splits: bool,
+        drop_features,
+        drop_groups,
+    ):
+        self._raw_desc = raw_desc
+        self._raw_dist = raw_dist
+        self._schedule = schedule
+        self._has_splits = has_splits
+        self._drop_features = drop_features
+        self._drop_groups = drop_groups
+
+    def _compute(self, extra: list[str]) -> AggregatedResult:
+        from acteval._aggregation import (
+            descriptions_to_domain_level,
+            descriptions_to_group_level,
+            distances_to_domain_level,
+            distances_to_group_level,
+        )
+        split_name = (
+            "combined" if not extra
+            else ("by_attribute" if extra == ["label"] else "by_category")
+        )
+        label = f"{self._schedule} × {split_name}"
+        if self._schedule == "features":
+            desc, dist = _aggregate_features(self._raw_desc, self._raw_dist, extra=extra)
+        elif self._schedule == "groups":
+            desc = descriptions_to_group_level(self._raw_desc, extra=extra, drop=self._drop_features)
+            dist = distances_to_group_level(self._raw_dist, extra=extra, drop=self._drop_features)
+        else:  # domains
+            group_desc = descriptions_to_group_level(self._raw_desc, extra=extra, drop=self._drop_features)
+            group_dist = distances_to_group_level(self._raw_dist, extra=extra, drop=self._drop_features)
+            desc = descriptions_to_domain_level(group_desc, extra=extra, drop=self._drop_groups)
+            dist = distances_to_domain_level(group_dist, extra=extra, drop=self._drop_groups)
+        return AggregatedResult(desc, dist, _label=label)
+
+    @cached_property
+    def combined(self) -> AggregatedResult:
+        """Aggregated result with splits merged away."""
+        return self._compute([])
+
+    @cached_property
+    def by_attribute(self) -> AggregatedResult:
+        """Aggregated result split by attribute (one row per label value).
+
+        Raises ``SplitNotAvailableError`` if the parent ``EvalResult`` was
+        produced without ``split_on``.
+        """
+        if not self._has_splits:
+            raise SplitNotAvailableError(
+                "by_attribute is not available: this EvalResult was produced without split_on. "
+                "Pass target_attributes and split_on to Evaluator to enable split-based views."
+            )
+        return self._compute(["label"])
+
+    @cached_property
+    def by_category(self) -> AggregatedResult:
+        """Aggregated result split by attribute category (one row per label × cat).
+
+        Raises ``SplitNotAvailableError`` if the parent ``EvalResult`` was
+        produced without ``split_on``.
+        """
+        if not self._has_splits:
+            raise SplitNotAvailableError(
+                "by_category is not available: this EvalResult was produced without split_on. "
+                "Pass target_attributes and split_on to Evaluator to enable split-based views."
+            )
+        return self._compute(["label", "cat"])
+
+    def __repr__(self) -> str:
+        available = [".combined"]
+        if self._has_splits:
+            available += [".by_attribute", ".by_category"]
+        attrs = " / ".join(available)
+        return (
+            f"ScheduleView [{self._schedule}]  ({attrs})\n\n"
+            f"{self.combined.distances.to_string()}"
+        )
+
+
 class EvalResult:
     """Stores raw segment-level data; computes three-tier aggregation on demand.
 
-    Use ``aggregate()`` to get the full set of output DataFrames, or access
-    named properties (``descriptions``, ``domain_distances``, etc.) which call
-    ``aggregate()`` with default parameters.
+    Access ``result.features``, ``result.groups``, or ``result.domains`` to get
+    a ``ScheduleView``, then ``.combined``, ``.by_attribute``, or
+    ``.by_category`` to obtain an ``AggregatedResult``.
 
-    Use ``save(path)`` to write all frames to CSV files.
+    Examples::
+
+        result.domains.combined.distances      # domain-level distances
+        result.groups.by_attribute.distances   # group-level, split by attribute
+        result.features.by_category.save("out/raw/")
     """
 
     def __init__(self, raw_desc: DataFrame, raw_dist: DataFrame):
@@ -51,151 +182,58 @@ class EvalResult:
             "distances": ResultFrame.from_wide(self._raw_dist),
         }
 
-    # --- on-demand aggregation ---
+    # --- split availability ---
 
-    def aggregate(
-        self,
-        drop_features: list[tuple] | None = DEFAULT_REMOVE_FEATURES,
-        drop_groups: list[tuple] | None = DEFAULT_REMOVE_GROUPS,
-    ) -> dict[str, DataFrame]:
-        """Compute all output tiers from raw segment-level data.
-
-        Args:
-            drop_features: Segment-level rows to drop before group aggregation.
-                Defaults to ``DEFAULT_REMOVE_FEATURES``.  Pass ``None`` or ``[]``
-                to skip filtering.
-            drop_groups: Group-level rows to drop before domain aggregation.
-                Defaults to ``DEFAULT_REMOVE_GROUPS``.  Pass ``None`` or ``[]``
-                to skip filtering.
-
-        Returns:
-            Dict with keys: ``descriptions``, ``distances``,
-            ``group_descriptions``, ``group_distances``,
-            ``domain_descriptions``, ``domain_distances``.
-            When real attribute splits were used, also includes ``label_*``
-            variants of each key.
-        """
-        from acteval._aggregation import (
-            descriptions_to_domain_level,
-            descriptions_to_group_level,
-            distances_to_domain_level,
-            distances_to_group_level,
-        )
-
-        feat_desc, feat_dist = _aggregate_features(self._raw_desc, self._raw_dist)
-        group_desc = descriptions_to_group_level(self._raw_desc, drop=drop_features)
-        group_dist = distances_to_group_level(self._raw_dist, drop=drop_features)
-        domain_desc = descriptions_to_domain_level(group_desc, drop=drop_groups)
-        domain_dist = distances_to_domain_level(group_dist, drop=drop_groups)
-
-        frames: dict[str, DataFrame] = {
-            "descriptions": feat_desc,
-            "distances": feat_dist,
-            "group_descriptions": group_desc,
-            "group_distances": group_dist,
-            "domain_descriptions": domain_desc,
-            "domain_distances": domain_dist,
-        }
-
-        # Include label_* only when real splits exist
-        has_labels = not (
+    @property
+    def has_splits(self) -> bool:
+        """True when the ``Evaluator`` was run with ``split_on``."""
+        return not (
             self._raw_desc.index.get_level_values("label").unique().tolist() == ["__split__"]
         )
-        if has_labels:
-            lg_desc = descriptions_to_group_level(self._raw_desc, extra=["label"], drop=drop_features)
-            lg_dist = distances_to_group_level(self._raw_dist, extra=["label"], drop=drop_features)
-            ld_desc = descriptions_to_domain_level(lg_desc, extra=["label"], drop=drop_groups)
-            ld_dist = distances_to_domain_level(lg_dist, extra=["label"], drop=drop_groups)
-            frames.update({
-                "label_descriptions": self._raw_desc,
-                "label_distances": self._raw_dist,
-                "label_group_descriptions": lg_desc,
-                "label_group_distances": lg_dist,
-                "label_domain_descriptions": ld_desc,
-                "label_domain_distances": ld_dist,
-            })
 
-        return frames
+    # --- schedule-level accessors ---
 
-    # --- named properties (call aggregate() with defaults) ---
+    @cached_property
+    def features(self) -> ScheduleView:
+        """Feature-level view: index ``(domain, feature, segment[, ...])``.
 
-    @property
-    def descriptions(self) -> DataFrame:
-        return self.aggregate()["descriptions"]
-
-    @property
-    def distances(self) -> DataFrame:
-        return self.aggregate()["distances"]
-
-    @property
-    def group_descriptions(self) -> DataFrame:
-        return self.aggregate()["group_descriptions"]
-
-    @property
-    def group_distances(self) -> DataFrame:
-        return self.aggregate()["group_distances"]
-
-    @property
-    def domain_descriptions(self) -> DataFrame:
-        return self.aggregate()["domain_descriptions"]
-
-    @property
-    def domain_distances(self) -> DataFrame:
-        return self.aggregate()["domain_distances"]
-
-    @property
-    def label_descriptions(self) -> DataFrame | None:
-        return self.aggregate().get("label_descriptions")
-
-    @property
-    def label_distances(self) -> DataFrame | None:
-        return self.aggregate().get("label_distances")
-
-    @property
-    def label_group_descriptions(self) -> DataFrame | None:
-        return self.aggregate().get("label_group_descriptions")
-
-    @property
-    def label_group_distances(self) -> DataFrame | None:
-        return self.aggregate().get("label_group_distances")
-
-    @property
-    def label_domain_descriptions(self) -> DataFrame | None:
-        return self.aggregate().get("label_domain_descriptions")
-
-    @property
-    def label_domain_distances(self) -> DataFrame | None:
-        return self.aggregate().get("label_domain_distances")
-
-    # --- dict-like interface (backward compat) ---
-
-    def __getitem__(self, key: str) -> DataFrame:
-        return self.aggregate()[key]
-
-    def __iter__(self):
-        return iter(self.aggregate())
-
-    def keys(self):
-        return self.aggregate().keys()
-
-    def values(self):
-        return self.aggregate().values()
-
-    def items(self):
-        return self.aggregate().items()
-
-    # --- persistence ---
-
-    def save(self, path: str | Path) -> None:
-        """Save all aggregated frames to CSV files in *path*.
-
-        Creates the directory if it does not exist.  One file per frame:
-        ``descriptions.csv``, ``distances.csv``, ``group_descriptions.csv``, etc.
+        Most granular schedule level; useful for disk storage.
         """
-        out = Path(path)
-        out.mkdir(parents=True, exist_ok=True)
-        for name, frame in self.aggregate().items():
-            frame.to_csv(out / f"{name}.csv")
+        return ScheduleView(
+            self._raw_desc, self._raw_dist,
+            schedule="features",
+            has_splits=self.has_splits,
+            drop_features=DEFAULT_REMOVE_FEATURES,
+            drop_groups=DEFAULT_REMOVE_GROUPS,
+        )
+
+    @cached_property
+    def groups(self) -> ScheduleView:
+        """Group-level view: index ``(domain, feature[, ...])``.
+
+        Intermediate schedule level; one row per feature group.
+        """
+        return ScheduleView(
+            self._raw_desc, self._raw_dist,
+            schedule="groups",
+            has_splits=self.has_splits,
+            drop_features=DEFAULT_REMOVE_FEATURES,
+            drop_groups=DEFAULT_REMOVE_GROUPS,
+        )
+
+    @cached_property
+    def domains(self) -> ScheduleView:
+        """Domain-level view: index ``(domain[, ...])``.
+
+        Most aggregated level; best for terminal output and quick review.
+        """
+        return ScheduleView(
+            self._raw_desc, self._raw_dist,
+            schedule="domains",
+            has_splits=self.has_splits,
+            drop_features=DEFAULT_REMOVE_FEATURES,
+            drop_groups=DEFAULT_REMOVE_GROUPS,
+        )
 
     # --- model introspection ---
 
@@ -205,13 +243,13 @@ class EvalResult:
         skip = {"observed", "mean", "std"}
         return [
             c
-            for c in self.domain_distances.columns
+            for c in self.domains.combined.distances.columns
             if c not in skip and not c.endswith("__weight")
         ]
 
     def summary(self) -> DataFrame:
         """Domain-level distances for each model (no observed/mean/std columns)."""
-        return self.domain_distances[self.model_names]
+        return self.domains.combined.distances[self.model_names]
 
     def rank_models(self) -> Series:
         """Mean domain distance per model, sorted ascending (lower is better)."""
@@ -226,6 +264,27 @@ class EvalResult:
         models = self.model_names
         header = f"EvalResult — {len(models)} model(s): {', '.join(models)}"
         return f"{header}\n\n{self.summary().to_string()}"
+
+    # --- persistence ---
+
+    def save(self, path: str | Path) -> None:
+        """Save aggregated frames to CSV files under *path*.
+
+        Creates subdirectories for each schedule × split combination.
+        Combined tiers are always written; split-based tiers are written only
+        when the ``EvalResult`` was produced with ``split_on``.
+        """
+        out = Path(path)
+        self.features.combined.save(out / "features")
+        self.groups.combined.save(out / "groups")
+        self.domains.combined.save(out / "domains")
+        if self.has_splits:
+            self.features.by_attribute.save(out / "features_by_attribute")
+            self.features.by_category.save(out / "features_by_category")
+            self.groups.by_attribute.save(out / "groups_by_attribute")
+            self.groups.by_category.save(out / "groups_by_category")
+            self.domains.by_attribute.save(out / "domains_by_attribute")
+            self.domains.by_category.save(out / "domains_by_category")
 
 
 class Evaluator:
