@@ -51,7 +51,9 @@ class AggregatedResult:
         self._label = _label
 
     def __repr__(self) -> str:
-        header = f"AggregatedResult [{self._label}]" if self._label else "AggregatedResult"
+        header = (
+            f"AggregatedResult [{self._label}]" if self._label else "AggregatedResult"
+        )
         return f"{header}\n\n{self.distances.to_string()}"
 
     def save(self, path: str | Path) -> None:
@@ -93,21 +95,37 @@ class ScheduleView:
             distances_to_domain_level,
             distances_to_group_level,
         )
+
         split_name = (
-            "combined" if not extra
+            "combined"
+            if not extra
             else ("by_attribute" if extra == ["label"] else "by_category")
         )
         label = f"{self._schedule} × {split_name}"
         if self._schedule == "features":
-            desc, dist = _aggregate_features(self._raw_desc, self._raw_dist, extra=extra)
+            desc, dist = _aggregate_features(
+                self._raw_desc, self._raw_dist, extra=extra
+            )
         elif self._schedule == "groups":
-            desc = descriptions_to_group_level(self._raw_desc, extra=extra, drop=self._drop_features)
-            dist = distances_to_group_level(self._raw_dist, extra=extra, drop=self._drop_features)
+            desc = descriptions_to_group_level(
+                self._raw_desc, extra=extra, drop=self._drop_features
+            )
+            dist = distances_to_group_level(
+                self._raw_dist, extra=extra, drop=self._drop_features
+            )
         else:  # domains
-            group_desc = descriptions_to_group_level(self._raw_desc, extra=extra, drop=self._drop_features)
-            group_dist = distances_to_group_level(self._raw_dist, extra=extra, drop=self._drop_features)
-            desc = descriptions_to_domain_level(group_desc, extra=extra, drop=self._drop_groups)
-            dist = distances_to_domain_level(group_dist, extra=extra, drop=self._drop_groups)
+            group_desc = descriptions_to_group_level(
+                self._raw_desc, extra=extra, drop=self._drop_features
+            )
+            group_dist = distances_to_group_level(
+                self._raw_dist, extra=extra, drop=self._drop_features
+            )
+            desc = descriptions_to_domain_level(
+                group_desc, extra=extra, drop=self._drop_groups
+            )
+            dist = distances_to_domain_level(
+                group_dist, extra=extra, drop=self._drop_groups
+            )
         return AggregatedResult(desc, dist, _label=label)
 
     @cached_property
@@ -169,7 +187,7 @@ class EvalResult:
     """
 
     def __init__(self, raw_desc: DataFrame, raw_dist: DataFrame):
-        self._raw_desc = raw_desc   # (domain, feature, segment, label, cat) wide
+        self._raw_desc = raw_desc  # (domain, feature, segment, label, cat) wide
         self._raw_dist = raw_dist
 
     # --- raw access ---
@@ -188,7 +206,8 @@ class EvalResult:
     def has_splits(self) -> bool:
         """True when the ``Evaluator`` was run with ``split_on``."""
         return not (
-            self._raw_desc.index.get_level_values("label").unique().tolist() == ["__split__"]
+            self._raw_desc.index.get_level_values("label").unique().tolist()
+            == ["__split__"]
         )
 
     # --- schedule-level accessors ---
@@ -200,7 +219,8 @@ class EvalResult:
         Most granular schedule level; useful for disk storage.
         """
         return ScheduleView(
-            self._raw_desc, self._raw_dist,
+            self._raw_desc,
+            self._raw_dist,
             schedule="features",
             has_splits=self.has_splits,
             drop_features=DEFAULT_REMOVE_FEATURES,
@@ -214,7 +234,8 @@ class EvalResult:
         Intermediate schedule level; one row per feature group.
         """
         return ScheduleView(
-            self._raw_desc, self._raw_dist,
+            self._raw_desc,
+            self._raw_dist,
             schedule="groups",
             has_splits=self.has_splits,
             drop_features=DEFAULT_REMOVE_FEATURES,
@@ -228,7 +249,8 @@ class EvalResult:
         Most aggregated level; best for terminal output and quick review.
         """
         return ScheduleView(
-            self._raw_desc, self._raw_dist,
+            self._raw_desc,
+            self._raw_dist,
             schedule="domains",
             has_splits=self.has_splits,
             drop_features=DEFAULT_REMOVE_FEATURES,
@@ -324,9 +346,7 @@ class Evaluator:
                 )
                 if is_float or is_large_int:
                     try:
-                        _, edges = pd.qcut(
-                            series, q=5, retbins=True, duplicates="drop"
-                        )
+                        _, edges = pd.qcut(series, q=5, retbins=True, duplicates="drop")
                     except ValueError:
                         _, edges = pd.cut(series, bins=5, retbins=True)
                     edges[0] = -np.inf
@@ -499,6 +519,43 @@ class Evaluator:
             synthetic_attributes=synth_attrs,
             verbose=verbose,
         )
+
+    def compare_populations(
+        self,
+        synthetic_schedules: dict[str, DataFrame],
+        synthetic_attributes: dict[str, DataFrame] | None = None,
+        verbose: bool = False,
+    ) -> "EvalResult":
+        """Compare synthetic populations against target, split by attribute categories.
+
+        Convenience wrapper: resets state, calls ``compare_population`` for each
+        model, then returns ``report()``.
+
+        Args:
+            synthetic_schedules: ``{model_name: schedules_df}``.
+            synthetic_attributes: Optional ``{model_name: attributes_df}`` with ``pid``
+                column.  If omitted, no attribute-based splitting is applied.
+            verbose: Print progress.
+
+        Returns:
+            EvalResult wrapping raw segment-level data.
+        """
+        self.collected_descriptions = {}
+        self.collected_distances = {}
+        for model, schedule in synthetic_schedules.items():
+            attrs = (
+                synthetic_attributes[model]
+                if synthetic_attributes is not None
+                else None
+            )
+            self.compare_population(
+                model=model,
+                schedule=schedule,
+                attributes=attrs,
+                verbose=verbose,
+            )
+
+        return self.report()
 
     def compare_population(
         self,
@@ -678,37 +735,6 @@ class Evaluator:
         )
         return EvalResult(raw_desc=descriptions, raw_dist=distances)
 
-    def compare_populations(
-        self,
-        synthetic_schedules: dict[str, DataFrame],
-        synthetic_attributes: dict[str, DataFrame],
-        verbose: bool = False,
-    ) -> "EvalResult":
-        """Compare synthetic populations against target, split by attribute categories.
-
-        Convenience wrapper: resets state, calls ``compare_population`` for each
-        model, then returns ``report()``.
-
-        Args:
-            synthetic_schedules: ``{model_name: schedules_df}``.
-            synthetic_attributes: ``{model_name: attributes_df}`` with ``pid`` column.
-            verbose: Print progress.
-
-        Returns:
-            EvalResult wrapping raw segment-level data.
-        """
-        self.collected_descriptions = {}
-        self.collected_distances = {}
-        for model, schedule in synthetic_schedules.items():
-            self.compare_population(
-                model=model,
-                schedule=schedule,
-                attributes=synthetic_attributes[model],
-                verbose=verbose,
-            )
-
-        return self.report()
-
 
 def compare(
     observed: DataFrame,
@@ -731,7 +757,9 @@ def compare(
     """
     if _is_dataframe(synthetic):
         synthetic = {"synthetic": synthetic}
-    return Evaluator(observed).compare(synthetic, attributes=attributes, verbose=verbose)
+    return Evaluator(observed).compare(
+        synthetic, attributes=attributes, verbose=verbose
+    )
 
 
 def compare_splits(
