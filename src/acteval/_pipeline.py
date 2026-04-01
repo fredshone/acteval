@@ -246,7 +246,7 @@ def _model_cols_structural(
 
     Args:
         model: Model name.
-        per_pid_flags: Output of ``structural.feasibility_per_pid`` for the full
+        per_pid_flags: Output of ``structural.feasibility`` for the full
             synthetic population, pre-computed once before the split loop.
         novel_dense_pids: Dense pid indices (0-based) of the novel persons in
             this (split, cat) subset — i.e. synthetic persons whose sequence is

@@ -4,6 +4,7 @@ import numpy as np
 from numpy import ndarray
 from pandas import DataFrame
 
+from acteval._compat import _coerce_to_pandas
 from acteval.features._utils import _cumcount
 
 
@@ -35,18 +36,19 @@ class Population:
     Lazy properties (computed on first access):
         act_enum_key: cumcount within (pid, act), e.g. "home0", "work0", "home1".
         seq_key: cumcount within pid, e.g. "0home", "1work", "2home".
-        count_matrix: shape (n, n_act_types) — activity counts per pid.
+        act_count_matrix: shape (n, n_act_types) — activity counts per pid.
     """
 
     def __init__(self, df: DataFrame):
         """Construct a Population from a schedule DataFrame.
 
         Args:
-            df: DataFrame with columns pid, act, start, end, duration.
+            df: pandas or Polars DataFrame with columns pid, act, start, end, duration.
                 Rows are assumed sorted by pid; a defensive sort is applied if not.
                 The act column is optional. For timing, any two of start/end/duration
                 are sufficient — the third is derived automatically.
         """
+        df = _coerce_to_pandas(df)
         if "pid" not in df.columns:
             raise ValueError("schedule DataFrame is missing required column 'pid'")
         if df["pid"].isna().any():
@@ -212,7 +214,7 @@ class Population:
         )
 
     @property
-    def count_matrix(self) -> ndarray:
+    def act_count_matrix(self) -> ndarray:
         """Activity count matrix, shape (n, n_act_types)."""
         if self._lazy_count_matrix is None:
             matrix = np.zeros((self.n, self.n_act_types), dtype=np.int64)

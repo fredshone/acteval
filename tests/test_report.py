@@ -51,8 +51,8 @@ def test__score_features():
         ]
     )
     expected = Series({"home": 0.0, "work": 0.0}, name="test").sort_index()
-    x = start_times_by_act(Population(observed))
-    y = start_times_by_act(Population(y))
+    x = start_times_by_act(Population(observed)).aggregate()
+    y = start_times_by_act(Population(y)).aggregate()
     result = _score_features("test", x, y, mae, (array([0]), array([1]))).sort_index()
     assert result.equals(expected)
 
@@ -75,8 +75,8 @@ def test_score_features_with_default():
         ]
     )
     expected = Series({"home": 0.0, "work": 1.0}, name="test").sort_index()
-    x = start_times_by_act(Population(observed))
-    y = start_times_by_act(Population(y))
+    x = start_times_by_act(Population(observed)).aggregate()
+    y = start_times_by_act(Population(y)).aggregate()
     result = _score_features("test", x, y, mae, (array([0]), array([1]))).sort_index()
     assert result.equals(expected)
 

@@ -22,8 +22,8 @@ import pandas as pd
 from numpy import ndarray
 from pandas import DataFrame
 
-from acteval.features.participation import participation_rates_by_act_per_pid
-from acteval.features.transitions import ngrams_per_pid
+from acteval.features.participation import participation_rates_by_act
+from acteval.features.transitions import ngrams
 from acteval.population import Population
 
 
@@ -221,13 +221,13 @@ def _pairwise_soft_dtw(array: ndarray, chunk_size: int, gamma: float = 1.0) -> n
 
 
 def _participation_feature_matrix(pop: Population) -> ndarray:
-    pf = participation_rates_by_act_per_pid(pop)
+    pf = participation_rates_by_act(pop)
     matrix, _ = _extract_feature_matrix(pf.data, pop.n, factor=float(pf.factor))
     return _normalize_columns(matrix)
 
 
 def _transition_feature_matrix(pop: Population) -> ndarray:
-    pf = ngrams_per_pid(pop, n=2, min_count=0)
+    pf = ngrams(pop, n=2, min_count=0)
     matrix, _ = _extract_feature_matrix(pf.data, pop.n, factor=float(pf.factor))
     return _normalize_columns(matrix)
 

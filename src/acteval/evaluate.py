@@ -1,4 +1,7 @@
+import warnings
+
 import numpy as np
+import pandas as pd
 from pandas import DataFrame, MultiIndex, Series, concat
 
 from acteval._pipeline import (
@@ -23,6 +26,7 @@ from acteval._aggregation import (
     distances_to_group_level,
 )
 from acteval.features import creativity, structural
+from acteval._compat import _coerce_to_pandas, _is_dataframe
 from acteval._jobs import get_jobs
 from acteval.population import Population
 
@@ -145,10 +149,14 @@ class Evaluator:
         split_on: list[str] | None = None,
         config_path=None,
     ):
+        target = _coerce_to_pandas(target)
+        if target_attributes is not None:
+            target_attributes = _coerce_to_pandas(target_attributes)
         if (target_attributes is None) != (split_on is None):
             raise ValueError(
                 "target_attributes and split_on must both be provided or both be None"
             )
+        self._numeric_bins: dict[str, tuple[np.ndarray, list[str]]] = {}
         if target_attributes is not None:
             if "pid" not in target_attributes.columns:
                 raise ValueError(
@@ -159,6 +167,33 @@ class Evaluator:
                 raise ValueError(
                     f"split_on column(s) {missing} not found in target_attributes"
                 )
+            _ORDINAL_LABELS = ["lowest", "low", "mid", "high", "highest"]
+            for col in split_on:
+                series = target_attributes[col]
+                is_float = pd.api.types.is_float_dtype(series)
+                is_large_int = (
+                    pd.api.types.is_integer_dtype(series) and series.nunique() > 10
+                )
+                if is_float or is_large_int:
+                    try:
+                        _, edges = pd.qcut(
+                            series, q=5, retbins=True, duplicates="drop"
+                        )
+                    except ValueError:
+                        _, edges = pd.cut(series, bins=5, retbins=True)
+                    edges[0] = -np.inf
+                    edges[-1] = np.inf
+                    actual_n = len(edges) - 1
+                    labels = _ORDINAL_LABELS[:actual_n]
+                    self._numeric_bins[col] = (edges, labels)
+                    warnings.warn(
+                        f"split_on column '{col}' is numeric; binning into "
+                        f"{actual_n} ordinal bins {labels}. Encode as categorical "
+                        f"to suppress this warning.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+            target_attributes = self._apply_numeric_bins(target_attributes)
         self._target = target
         self._target_pop = Population(target)
         self._config_path = config_path
@@ -187,6 +222,18 @@ class Evaluator:
             lines.append(f"  split     : {split} \u2192 {cats}")
         lines.append(")")
         return "\n".join(lines)
+
+    def _apply_numeric_bins(self, attributes: DataFrame) -> DataFrame:
+        """Replace numeric split columns with ordinal bin labels using stored edges."""
+        if not self._numeric_bins:
+            return attributes
+        attributes = attributes.copy()
+        for col, (edges, labels) in self._numeric_bins.items():
+            if col in attributes.columns:
+                attributes[col] = pd.cut(
+                    attributes[col], bins=edges, labels=labels, include_lowest=True
+                ).astype(str)
+        return attributes
 
     def _precompute_target(self) -> None:
         # Phase 1: run every feature function over the full target population,
@@ -304,6 +351,7 @@ class Evaluator:
             )
         # Assign all synthetic persons to a single "__split__" = "all" category
         # so compare_splits can run its generic (split, cat) loop with one iteration.
+        synthetic = {m: _coerce_to_pandas(df) for m, df in synthetic.items()}
         synth_attrs = {
             m: DataFrame({"pid": df["pid"].unique(), "__split__": "all"})
             for m, df in synthetic.items()
@@ -341,6 +389,9 @@ class Evaluator:
                 (or pass ``None``) when no splits are in use.
             verbose: Print progress.
         """
+        schedule = _coerce_to_pandas(schedule)
+        if attributes is not None:
+            attributes = _coerce_to_pandas(attributes)
         uses_real_splits = self._split_on != ["__split__"]
         if attributes is None:
             if uses_real_splits:
@@ -360,6 +411,7 @@ class Evaluator:
                 raise ValueError(
                     f"attributes DataFrame for model '{model}' is missing split column(s) {missing}"
                 )
+        attributes = self._apply_numeric_bins(attributes)
         pop = Population(schedule)
         pid_features = {
             (spec.domain, spec.name): spec.feature_fn(pop)
@@ -378,7 +430,7 @@ class Evaluator:
         if self._run_creativity or self._run_structural:
             pid_hashes = creativity.hash_per_pid(schedule)
         if self._run_structural:
-            feasibility_flags = structural.feasibility_per_pid(pop)
+            feasibility_flags = structural.feasibility(pop)
 
         # Phase 2: iterate over (split, category) combinations and subset the
         # pre-computed features down to the relevant pids.
@@ -592,7 +644,7 @@ def compare(
     Returns:
         EvalResult with descriptions, distances, and grouped variants.
     """
-    if isinstance(synthetic, DataFrame):
+    if _is_dataframe(synthetic):
         synthetic = {"synthetic": synthetic}
     return Evaluator(observed).compare(
         synthetic, attributes=attributes, report_stats=report_stats, verbose=verbose

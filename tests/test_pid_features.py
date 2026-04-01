@@ -8,11 +8,10 @@ Verifies:
 import numpy as np
 from pandas import DataFrame
 
-from acteval.features import participation, times
-from acteval.features.transitions import ngrams_per_pid
 from acteval.evaluate import Evaluator, compare_splits
+from acteval.features import participation, structural, times
+from acteval.features.transitions import full_sequences, ngrams
 from acteval.population import Population
-from acteval.features import structural
 
 
 def _pop():
@@ -75,10 +74,8 @@ def _assert_features_subset_equal(expected, actual, label=""):
 def test_start_times_subset():
     pop, df = _pop()
     sub_df = df[df.pid.isin([0, 2])]
-    expected = times.start_times_by_act_plan_enum_per_pid(
-        Population(sub_df)
-    ).aggregate()
-    pid_feat = times.start_times_by_act_plan_enum_per_pid(pop)
+    expected = times.start_times_by_act_plan_enum(Population(sub_df)).aggregate()
+    pid_feat = times.start_times_by_act_plan_enum(pop)
     actual = pid_feat.subset(np.array([0, 2])).aggregate()
     _assert_features_subset_equal(expected, actual, "start_times subset")
 
@@ -86,8 +83,8 @@ def test_start_times_subset():
 def test_durations_subset():
     pop, df = _pop()
     sub_df = df[df.pid.isin([1])]
-    expected = times.durations_by_act_plan_enum_per_pid(Population(sub_df)).aggregate()
-    pid_feat = times.durations_by_act_plan_enum_per_pid(pop)
+    expected = times.durations_by_act_plan_enum(Population(sub_df)).aggregate()
+    pid_feat = times.durations_by_act_plan_enum(pop)
     actual = pid_feat.subset(np.array([1])).aggregate()
     _assert_features_subset_equal(expected, actual, "durations subset")
 
@@ -95,10 +92,8 @@ def test_durations_subset():
 def test_participation_rates_subset():
     pop, df = _pop()
     sub_df = df[df.pid.isin([0, 1])]
-    expected = participation.participation_rates_by_act_per_pid(
-        Population(sub_df)
-    ).aggregate()
-    pid_feat = participation.participation_rates_by_act_per_pid(pop)
+    expected = participation.participation_rates_by_act(Population(sub_df)).aggregate()
+    pid_feat = participation.participation_rates_by_act(pop)
     actual = pid_feat.subset(np.array([0, 1])).aggregate()
     _assert_features_subset_equal(expected, actual, "participation subset")
 
@@ -106,8 +101,8 @@ def test_participation_rates_subset():
 def test_sequence_lengths_subset():
     pop, df = _pop()
     sub_df = df[df.pid.isin([0, 2])]
-    expected = structural.sequence_lengths_per_pid(Population(sub_df)).aggregate()
-    pid_feat = structural.sequence_lengths_per_pid(pop)
+    expected = participation.sequence_lengths(Population(sub_df)).aggregate()
+    pid_feat = participation.sequence_lengths(pop)
     actual = pid_feat.subset(np.array([0, 2])).aggregate()
     _assert_features_subset_equal(expected, actual, "sequence_lengths subset")
 
@@ -116,10 +111,77 @@ def test_transitions_subset():
     pop, df = _pop()
     # Use min_count=0 so all n-grams are included
     sub_df = df[df.pid.isin([0, 1])]
-    expected = ngrams_per_pid(Population(sub_df), n=2, min_count=0).aggregate()
-    pid_feat = ngrams_per_pid(pop, n=2, min_count=0)
+    expected = ngrams(Population(sub_df), n=2, min_count=0).aggregate()
+    pid_feat = ngrams(pop, n=2, min_count=0)
     actual = pid_feat.subset(np.array([0, 1])).aggregate()
     _assert_features_subset_equal(expected, actual, "transitions subset")
+
+
+def test_seq_participation_rates_subset():
+    pop, df = _pop()
+    sub_df = df[df.pid.isin([0, 2])]
+    expected = participation.participation_rates_by_seq_act(
+        Population(sub_df)
+    ).aggregate()
+    pid_feat = participation.participation_rates_by_seq_act(pop)
+    actual = pid_feat.subset(np.array([0, 2])).aggregate()
+    _assert_features_subset_equal(expected, actual, "seq_participation subset")
+
+
+def test_enum_participation_rates_subset():
+    pop, df = _pop()
+    sub_df = df[df.pid.isin([1, 2])]
+    expected = participation.participation_rates_by_act_enum(
+        Population(sub_df)
+    ).aggregate()
+    pid_feat = participation.participation_rates_by_act_enum(pop)
+    actual = pid_feat.subset(np.array([1, 2])).aggregate()
+    _assert_features_subset_equal(expected, actual, "enum_participation subset")
+
+
+def test_start_times_by_act_subset():
+    pop, df = _pop()
+    sub_df = df[df.pid.isin([0, 1])]
+    expected = times.start_times_by_act(Population(sub_df)).aggregate()
+    pid_feat = times.start_times_by_act(pop)
+    actual = pid_feat.subset(np.array([0, 1])).aggregate()
+    _assert_features_subset_equal(expected, actual, "start_times_by_act subset")
+
+
+def test_end_times_by_act_subset():
+    pop, df = _pop()
+    sub_df = df[df.pid.isin([0, 2])]
+    expected = times.end_times_by_act(Population(sub_df)).aggregate()
+    pid_feat = times.end_times_by_act(pop)
+    actual = pid_feat.subset(np.array([0, 2])).aggregate()
+    _assert_features_subset_equal(expected, actual, "end_times_by_act subset")
+
+
+def test_durations_by_act_subset():
+    pop, df = _pop()
+    sub_df = df[df.pid.isin([1])]
+    expected = times.durations_by_act(Population(sub_df)).aggregate()
+    pid_feat = times.durations_by_act(pop)
+    actual = pid_feat.subset(np.array([1])).aggregate()
+    _assert_features_subset_equal(expected, actual, "durations_by_act subset")
+
+
+def test_time_consistency_subset():
+    pop, df = _pop()
+    sub_df = df[df.pid.isin([0, 2])]
+    expected = structural.time_consistency(Population(sub_df)).aggregate()
+    pid_feat = structural.time_consistency(pop)
+    actual = pid_feat.subset(np.array([0, 2])).aggregate()
+    _assert_features_subset_equal(expected, actual, "time_consistency subset")
+
+
+def test_full_sequences_subset():
+    pop, df = _pop()
+    sub_df = df[df.pid.isin([0, 1])]
+    expected = full_sequences(Population(sub_df)).aggregate()
+    pid_feat = full_sequences(pop)
+    actual = pid_feat.subset(np.array([0, 1])).aggregate()
+    _assert_features_subset_equal(expected, actual, "full_sequences subset")
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +191,7 @@ def test_transitions_subset():
 
 def test_empty_subset():
     pop, _ = _pop()
-    pid_feat = times.start_times_by_act_plan_enum_per_pid(pop)
+    pid_feat = times.start_times_by_act_plan_enum(pop)
     result = pid_feat.subset(np.array([], dtype=np.int64)).aggregate()
     for key, (vals, weights) in result.items():
         assert len(vals) == 0
@@ -139,7 +201,7 @@ def test_empty_subset():
 def test_empty_population():
     df = DataFrame(columns=["pid", "act", "start", "end", "duration"])
     pop = Population(df)
-    pid_feat = times.start_and_duration_by_act_bins_per_pid(pop)
+    pid_feat = times.start_and_duration_by_act_bins(pop)
     assert pid_feat.data == {}
 
 

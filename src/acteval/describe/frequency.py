@@ -1,17 +1,21 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
+import numpy as np
+import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.patches import Patch
-from pandas import DataFrame
 
+from acteval.describe.utils import _to_population
 from acteval.features.frequency import binned_activity_density
 
 
-def frequency_plots(observed: DataFrame, ys: Optional[dict[DataFrame]], **kwargs):
+def frequency_plots(observed, ys: Optional[dict], **kwargs):
     if ys is None:
         ys = dict()
-    acts = list(observed.act.value_counts(ascending=False).index)
+    pop_obs = _to_population(observed)
+    act_order = np.argsort(pop_obs.act_count_matrix.sum(0))[::-1]
+    acts = [pop_obs.unique_acts[i] for i in act_order]
     class_map = {n: i for i, n in enumerate(acts)}
 
     n_plots = len(ys) + 2
@@ -37,14 +41,12 @@ def frequency_plots(observed: DataFrame, ys: Optional[dict[DataFrame]], **kwargs
 
     name = kwargs.pop("observed_title", "Observed")
 
-    plot_agg_acts(name, observed, class_map, ax=axs[0], legend=False, **kwargs)
+    plot_agg_acts(name, pop_obs, class_map, ax=axs[0], legend=False, **kwargs)
 
-    # now deal with ys
     for i, (name, y) in enumerate(ys.items()):
         ax = axs[i + 1]
-        plot_agg_acts(name, y, class_map, ax=ax, legend=False, **kwargs)
+        plot_agg_acts(name, _to_population(y), class_map, ax=ax, legend=False, **kwargs)
 
-    # legend
     elements = [Patch(facecolor=cmap[act], label=act.title()) for act in acts]
     axs[-1].axis("off")
     axs[-1].legend(handles=elements, loc="center left", frameon=False)
@@ -54,7 +56,7 @@ def frequency_plots(observed: DataFrame, ys: Optional[dict[DataFrame]], **kwargs
 
 def plot_agg_acts(
     name: str,
-    population: DataFrame,
+    population,
     class_map: dict,
     duration: int = 1440,
     step: int = 10,
@@ -63,26 +65,29 @@ def plot_agg_acts(
     **kwargs,
 ):
     interval = kwargs.pop("interval", 240)
+    pop = _to_population(population)
+    df = pd.DataFrame({
+        "pid": pop.pids,
+        "act": pop.acts,
+        "start": pop.starts,
+        "end": pop.ends,
+        "duration": pop.durations,
+    })
     bins = binned_activity_density(
-        population, duration=duration, step=step, class_map=class_map
+        df, duration=duration, step=step, class_map=class_map
     )
     columns = list(class_map.keys())
     totals = bins.sum(0)
     sorted_cols = [x for _, x in sorted(zip(totals, columns))]
-    df = DataFrame(bins, columns=columns)[sorted_cols]
-    df.index = [
+    df_plot = pd.DataFrame(bins, columns=columns)[sorted_cols]
+    df_plot.index = [
         datetime(2021, 11, 1, 0) + timedelta(minutes=i * step)
-        for i in range(len(df.index))
+        for i in range(len(df_plot.index))
     ]
-    fig = df.plot(kind="bar", stacked=True, width=1, ax=ax, legend=legend, **kwargs)
+    fig = df_plot.plot(kind="bar", stacked=True, width=1, ax=ax, legend=legend, **kwargs)
     if legend:
         ax.legend(loc="upper right")
     ax = fig.axes
-    labels = ["" for _ in range(len(df.index))]
-
-    labels[:: int(interval / step)] = [x.strftime("%H:%M") for x in df.index][
-        :: int(interval / step)
-    ]
     ax.set_xticks(
         [i / step for i in [0, 240, 480, 720, 960, 1200, 1440]],
         labels=["00:00", "04:00", "08:00", "12:00", "16:00", "20:00", "24:00"],

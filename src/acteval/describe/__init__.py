@@ -8,4 +8,6 @@ Sub-modules:
 - ``frequency``   — stacked bar plots of activity density over the day
 - ``times``       — histogram grids of start times, end times, and durations
 - ``transitions`` — sequence probability waterfall plots
+- ``plot``        — Gantt chart, stacked time-use, participation rates, bigram heatmaps
+- ``results``     — domain heatmap and feature-group bar chart for compare results
 """

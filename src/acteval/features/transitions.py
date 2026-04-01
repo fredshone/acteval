@@ -3,11 +3,10 @@ from numpy import ndarray
 from pandas import DataFrame, MultiIndex, Series
 
 from acteval.features._pid_features import PidFeatures
-from acteval.features._utils import weighted_features
 from acteval.population import Population
 
 
-def ngrams_per_pid(
+def ngrams(
     population: Population, n: int, min_count: int = 0
 ) -> PidFeatures:
     """Build per-pid n-gram transition features returning PidFeatures.
@@ -64,8 +63,6 @@ def ngrams_per_pid(
             code %= powers[i]
         return ">".join(str(label) for label in labels)
 
-    # Build PidFeatures: each key maps to (per-person counts, pids)
-    # All keys share the same pid array for efficient mask caching.
     result_data: dict[str, tuple[ndarray, ndarray]] = {}
     for j, ng_code in enumerate(unique_ngrams):
         label = _decode_ngram(ng_code)
@@ -74,33 +71,24 @@ def ngrams_per_pid(
     return PidFeatures(data=result_data, bin_size=None, factor=1)
 
 
-def tour(acts: Series) -> str:
+def full_sequences(population: Population) -> PidFeatures:
+    """Per-pid full-sequence one-hot counts keyed by abbreviated tour string.
+
+    Each person's full schedule is abbreviated to first characters joined by
+    '>' (e.g. 'h>w>h'). Each key maps to a per-person 0/1 indicator of
+    whether that person has that sequence.
     """
-    Extracts the tour from the given Series of activities.
-
-    Args:
-        acts (Series): A Series containing the activities.
-
-    Returns:
-        str: A string representation of the tour.
-    """
-    return ">".join(acts.str[0])
-
-
-def full_sequences(population: DataFrame) -> dict[str, tuple[ndarray, ndarray]]:
-    transitions = population.reset_index()
-    transitions = transitions.set_index(["index", "pid"])
-    transitions.act = transitions.act.astype(str)
-    transitions = transitions.groupby("pid").act.apply(tour)
-    transitions = (
-        transitions.groupby("pid")
-        .value_counts()
-        .unstack()
-        .fillna(0)
-        .astype(int)
-        .to_dict(orient="list")
-    )
-    return weighted_features(transitions)
+    acts = population.acts.astype(str)
+    pids_arr = np.arange(population.n)
+    seq_per_person = np.empty(population.n, dtype=object)
+    for i, (s, e) in enumerate(zip(population.pid_starts, population.pid_ends)):
+        seq_per_person[i] = ">".join(a[0] for a in acts[s:e])
+    unique_seqs, seq_codes = np.unique(seq_per_person, return_inverse=True)
+    n_seqs = len(unique_seqs)
+    count_matrix = np.zeros((population.n, n_seqs), dtype=np.int64)
+    count_matrix[np.arange(population.n), seq_codes] = 1
+    data = {seq: (count_matrix[:, j], pids_arr) for j, seq in enumerate(unique_seqs)}
+    return PidFeatures(data=data, bin_size=None, factor=1)
 
 
 def collect_sequence(acts: Series) -> str:

@@ -1,19 +1,24 @@
 from typing import Optional, Tuple
 
+import numpy as np
+import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.colors import ListedColormap as CMap
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
-from pandas import DataFrame
 
+from acteval.describe.utils import _to_population
 from acteval.features.transitions import sequence_probs
 
 
 def sequence_prob_plot(
-    observed: DataFrame, ys: Optional[dict[DataFrame]], **kwargs
+    observed, ys: Optional[dict], **kwargs
 ) -> Figure:
-    acts = list(observed.act.value_counts(ascending=False).index)
+    pop_obs = _to_population(observed)
+    act_order = np.argsort(pop_obs.act_count_matrix.sum(0))[::-1]
+    acts = [pop_obs.unique_acts[i] for i in act_order]
+
     cmap = kwargs.pop("cmap", None)
     if cmap is None:
         cmap = plt.cm.Set3
@@ -31,18 +36,16 @@ def sequence_prob_plot(
         figsize=kwargs.pop("figsize", (12, 5)),
         sharex=True,
         sharey=True,
-        # tight_layout=True,
         constrained_layout=True,
         gridspec_kw={"width_ratios": ratios},
     )
-    acts = list(observed.act.value_counts(ascending=False).index)
     name = kwargs.pop("observed_title", "Observed")
-    _probs_plot(name, observed, ax=axs[0], cmap=cmap, ylabel=True)
+    _probs_plot(name, pop_obs, ax=axs[0], cmap=cmap, ylabel=True)
 
     if ys is None:
         return fig
     for i, (name, y) in enumerate(ys.items()):
-        _probs_plot(name, y, ax=axs[i + 1], cmap=cmap)
+        _probs_plot(name, _to_population(y), ax=axs[i + 1], cmap=cmap)
         axs[i + 1].set_title(name)
 
     elements = [Patch(facecolor=cmap[act], label=act.title()) for act in acts]
@@ -54,12 +57,14 @@ def sequence_prob_plot(
 
 def _probs_plot(
     name: str,
-    population: DataFrame,
+    population,
     cmap: Optional[CMap],
     ax=Axes,
     ylabel=False,
 ) -> Tuple[Figure, Axes]:
-    probs = sequence_probs(population)
+    pop = _to_population(population)
+    df_for_probs = pd.DataFrame({"pid": pop.pids, "act": pop.acts})
+    probs = sequence_probs(df_for_probs)
     accumulated = probs[::-1].cumsum()[::-1]
 
     ys = []

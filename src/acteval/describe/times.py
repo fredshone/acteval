@@ -1,33 +1,39 @@
 from typing import Optional, Tuple
 
+import numpy as np
 from matplotlib import colormaps, patches
 from matplotlib import pyplot as plt
 from matplotlib.figure import Axes, Figure
 from pandas import DataFrame
 
+from acteval.describe.utils import _to_population
+from acteval.features.times import durations_by_act, end_times_by_act, start_times_by_act
+
 
 def times_distributions_plot(
-    observed: DataFrame, ys: Optional[dict[str, DataFrame]], **kwargs
+    observed, ys: Optional[dict], **kwargs
 ) -> Figure:
+    pop_obs = _to_population(observed)
+    act_order = np.argsort(pop_obs.act_count_matrix.sum(0))[::-1]
+    acts = [pop_obs.unique_acts[i] for i in act_order]
+
     ratios = [1 for _ in range(4)]
     ratios[0] = 0.2
     fig, axs = plt.subplots(
         4,
-        observed.act.nunique(),
+        len(acts),
         figsize=kwargs.pop("figsize", (12, 5)),
         sharex=True,
         sharey=False,
-        # tight_layout=True,
         constrained_layout=True,
         gridspec_kw={"height_ratios": ratios},
     )
-    acts = list(observed.act.value_counts(ascending=False).index)
     name = kwargs.pop("observed_title", "Observed")
-    _times_plot(name, observed, acts, axs=axs)
+    _times_plot(name, pop_obs, acts, axs=axs)
     if ys is None:
         return fig
     for name, y in ys.items():
-        _times_plot(name, y, acts, axs=axs)
+        _times_plot(name, _to_population(y), acts, axs=axs)
     for ax in axs[0]:
         ax.tick_params(axis="x", which="both", length=0.0)
     handles, labels = axs[1][0].get_legend_handles_labels()
@@ -44,7 +50,7 @@ def times_distributions_plot(
 
 def _times_plot(
     name: str,
-    population: DataFrame,
+    population,
     acts: list[str],
     axs: Axes,
     xmin: int = 0,
@@ -52,13 +58,14 @@ def _times_plot(
     step: int = 30,
     **kwargs,
 ) -> Tuple[Figure, Axes]:
-    starts = population.groupby("act", observed=False).start
-    ends = population.groupby("act", observed=False).end
-    durations = population.groupby("act", observed=False).duration
+    pop = _to_population(population)
+    start_feats = start_times_by_act(pop, bin_size=None)
+    end_feats = end_times_by_act(pop, bin_size=None)
+    dur_feats = durations_by_act(pop, bin_size=None)
     bins = list(range(xmin, xmax, step))
 
     for i, act in enumerate(acts):
-        if act not in population.act.unique():
+        if act not in start_feats.data:
             continue
         axs[0][i].spines["top"].set_visible(False)
         axs[0][i].spines["right"].set_visible(False)
@@ -68,11 +75,11 @@ def _times_plot(
         axs[0][i].set_yticks([])
 
         axs[1][i].set_title(act.title(), fontsize="small")
-        start_group = starts.get_group(act)
-        if len(start_group) < 5:
+        starts = start_feats.data[act][0]
+        if len(starts) < 5:
             continue
         axs[1][i].hist(
-            starts.get_group(act),
+            starts,
             bins=bins,
             density=True,
             histtype="step",
@@ -86,8 +93,9 @@ def _times_plot(
         axs[1][i].set_xticks([])
         axs[1][i].set_yticks([])
 
+        ends = end_feats.data[act][0]
         axs[2][i].hist(
-            ends.get_group(act),
+            ends,
             bins=bins,
             density=True,
             histtype="step",
@@ -101,8 +109,9 @@ def _times_plot(
         axs[2][i].set_xticks([])
         axs[2][i].set_yticks([])
 
+        durs = dur_feats.data[act][0]
         axs[3][i].hist(
-            durations.get_group(act),
+            durs,
             bins=bins,
             density=True,
             histtype="step",
@@ -136,11 +145,13 @@ def _times_plot(
 
 
 def joint_time_distributions_plot(
-    observed: DataFrame, ys: Optional[dict[DataFrame]], **kwargs
+    observed, ys: Optional[dict], **kwargs
 ) -> Figure:
     if ys is None:
         ys = dict()
-    acts = list(observed.act.value_counts(ascending=False).index)
+    pop_obs = _to_population(observed)
+    act_order = np.argsort(pop_obs.act_count_matrix.sum(0))[::-1]
+    acts = [pop_obs.unique_acts[i] for i in act_order]
     n_acts = len(acts)
     rows = len(ys) + 2
     ratios = [1 for _ in range(rows)]
@@ -152,7 +163,7 @@ def joint_time_distributions_plot(
 
     fig, axs = plt.subplots(
         rows,
-        observed.act.nunique(),
+        n_acts,
         figsize=kwargs.pop("figsize", (12, 5)),
         sharex=False,
         sharey=False,
@@ -160,7 +171,6 @@ def joint_time_distributions_plot(
         gridspec_kw={"height_ratios": ratios},
     )
 
-    # deal with observed first
     name = kwargs.pop("observed_title", "Observed")
 
     legend.append(name)
@@ -168,19 +178,16 @@ def joint_time_distributions_plot(
     lcolours = colormaps[cmap]([0, 0.5, 1])
     legend_colours.append(lcolours[int(len(lcolours) / 2)])
 
-    _joint_time_plot(observed, axs[1], acts, cmap=cmap)
+    _joint_time_plot(pop_obs, axs[1], acts, cmap=cmap)
 
-    # now deal with ys
     for i, (name, y) in enumerate(ys.items()):
-
         legend.append(name)
         cmap = cmaps.get(i + 1, "Reds")
         lcolours = colormaps[cmap]([0, 0.5, 1])
         legend_colours.append(lcolours[int(len(lcolours) / 2)])
 
-        _joint_time_plot(y, axs[i + 2], acts, cmap=cmap)
+        _joint_time_plot(_to_population(y), axs[i + 2], acts, cmap=cmap)
 
-    # xlabel on bottom row
     for ax in axs[-1]:
         ax.set_xlabel("Start times", fontsize=8)
         ax.set_xticks(
@@ -190,11 +197,9 @@ def joint_time_distributions_plot(
             fontsize=8,
         )
 
-    # acts
     for ax, act in zip(axs[1], acts):
         ax.set_title(act.title(), fontsize=9)
 
-    # deal with legend
     for i in range(n_acts):
         axs[0][i].spines["top"].set_visible(False)
         axs[0][i].spines["right"].set_visible(False)
@@ -220,7 +225,7 @@ def joint_time_distributions_plot(
 
 
 def _joint_time_plot(
-    population: DataFrame,
+    population,
     axs: Axes,
     acts: list[str],
     cmap: str,
@@ -231,8 +236,9 @@ def _joint_time_plot(
     xstep: int = 30,
     ystep: int = 30,
 ):
-    starts = population.groupby("act", observed=False).start
-    durations = population.groupby("act", observed=False).duration
+    pop = _to_population(population)
+    start_feats = start_times_by_act(pop, bin_size=None)
+    dur_feats = durations_by_act(pop, bin_size=None)
 
     start_bins = list(range(xmin, xmax, xstep))
     duration_bins = list(range(ymin, ymax, ystep))
@@ -240,10 +246,10 @@ def _joint_time_plot(
     for i, act in enumerate(acts):
         axs[i].set_xticks([])
         axs[i].set_yticks([])
-        if act not in population.act.unique():
+        if act not in start_feats.data:
             continue
-        act_starts = starts.get_group(act)
-        act_durations = durations.get_group(act)
+        act_starts = start_feats.data[act][0]
+        act_durations = dur_feats.data[act][0]
         axs[i].hist2d(
             x=act_starts,
             y=act_durations,

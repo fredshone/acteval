@@ -12,29 +12,9 @@ from acteval._aggregation import (
 )
 from acteval.population import Population
 from acteval.features.structural import (
-    contains_consecutive,
-    duration_consistency,
     feasibility_eval,
-    start_and_end_acts,
     time_consistency,
 )
-
-
-def test_start_and_end_acts():
-    population = DataFrame(
-        [
-            {"pid": 0, "act": "home"},
-            {"pid": 0, "act": "work"},
-            {"pid": 0, "act": "home"},
-            {"pid": 1, "act": "home"},
-            {"pid": 1, "act": "work"},
-        ]
-    )
-    expected = {
-        "first act home": (array([0, 1]), array([0, 2])),
-        "last act home": (array([0, 1]), array([1, 1])),
-    }
-    assert equals(start_and_end_acts(Population(population), target="home"), expected)
 
 
 def test_time_consistency():
@@ -47,54 +27,14 @@ def test_time_consistency():
             {"pid": 1, "start": 10, "end": 20, "duration": 10},
         ]
     )
-    expected = {
-        "starts at 0": (array([0, 1]), array([0, 2])),
-        "ends at 30": (array([0, 1]), array([1, 1])),
-        "duration is 30": (array([0, 1]), array([1, 1])),
-    }
-    assert equals(time_consistency(Population(population), target=30), expected)
-
-
-def test_duration_consistency():
-    population = DataFrame(
-        [
-            {"pid": 0, "start": 0, "end": 10, "duration": 10},
-            {"pid": 0, "start": 10, "end": 20, "duration": 10},
-            {"pid": 0, "start": 20, "end": 30, "duration": 10},
-            {"pid": 1, "start": 0, "end": 10, "duration": 10},
-            {"pid": 1, "start": 10, "end": 20, "duration": 10},
-        ]
-    )
-    expected = {"total duration": (array([20, 30]), array([1, 1]))}
-    assert equals(duration_consistency(Population(population), factor=1), expected)
-
-
-def test_does_not_contains_consecutive():
-    schedule = DataFrame(
-        [
-            {"act": "home"},
-            {"act": "work"},
-            {"act": "home"},
-            {"act": "work"},
-            {"act": "home"},
-        ]
-    )
-    assert not contains_consecutive(schedule, act="home")
-    assert not contains_consecutive(schedule, act="work")
-
-
-def test_contains_consecutive():
-    schedule = DataFrame(
-        [
-            {"act": "home"},
-            {"act": "home"},
-            {"act": "work"},
-            {"act": "home"},
-            {"act": "work"},
-        ]
-    )
-    assert contains_consecutive(schedule, act="home")
-    assert not contains_consecutive(schedule, act="work")
+    result = time_consistency(Population(population), target=30).aggregate()
+    assert set(result.keys()) == {"starts at 0", "ends at 30", "duration is 30"}
+    # Both persons start at 0 → only value 1, count 2
+    assert equals(result, {
+        "starts at 0": (array([1.]), array([2])),
+        "ends at 30": (array([0., 1.]), array([1, 1])),
+        "duration is 30": (array([0., 1.]), array([1, 1])),
+    })
 
 
 def test_feasibility_eval():
@@ -190,7 +130,6 @@ def test_describe_splits_structural():
     metrics = concat([observed_weights, observed_metrics, weights, metrics], axis=1)
     metrics["unit"] = "prob. invalid"
     frames = describe(metrics, metrics)
-    print(frames["descriptions"])
     assert len(frames["descriptions"]) == 8
     assert len(frames["group_descriptions"]) == 3
     assert len(frames["domain_descriptions"]) == 1

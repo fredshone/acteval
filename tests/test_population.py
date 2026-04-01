@@ -85,9 +85,9 @@ def test_seq_key(two_person_df):
 def test_count_matrix(two_person_df):
     pop = Population(two_person_df)
     expected = np.array([[2, 1], [1, 1]])  # rows=pids, cols=[home, work]
-    assert_array_equal(pop.count_matrix, expected)
+    assert_array_equal(pop.act_count_matrix, expected)
     # Second access uses cache
-    assert_array_equal(pop.count_matrix, expected)
+    assert_array_equal(pop.act_count_matrix, expected)
 
 
 def test_acts_and_times(two_person_df):

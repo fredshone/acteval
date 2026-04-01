@@ -2,64 +2,41 @@ import numpy as np
 from numpy import ndarray
 
 from acteval.features._pid_features import PidFeatures
-from acteval.features._utils import (
-    _collect_by_group,
-    _collect_by_group_with_pids,
-    weighted_features,
-)
+from acteval.features._utils import _collect_by_group_with_pids
 from acteval.population import Population
 
 
 def start_times_by_act(
-    population: Population, bin_size: int = 15, factor: int = 1440
-) -> dict[str, tuple[ndarray, ndarray]]:
-    features = _collect_by_group(population.acts, population.starts)
-    return weighted_features(features, bin_size=bin_size, factor=factor)
+    population: Population,
+    bin_size: int = 15,
+    factor: int = 1440,
+) -> PidFeatures:
+    """Per-pid start times grouped by activity (no occurrence index)."""
+    features = _collect_by_group_with_pids(population.acts, population.starts, population.pids)
+    return PidFeatures(data=features, bin_size=bin_size, factor=factor)
 
 
 def end_times_by_act(
-    population: Population, bin_size: int = 15, factor: int = 1440
-) -> dict[str, tuple[ndarray, ndarray]]:
-    features = _collect_by_group(population.acts, population.ends)
-    return weighted_features(features, bin_size=bin_size, factor=factor)
+    population: Population,
+    bin_size: int = 15,
+    factor: int = 1440,
+) -> PidFeatures:
+    """Per-pid end times grouped by activity (no occurrence index)."""
+    features = _collect_by_group_with_pids(population.acts, population.ends, population.pids)
+    return PidFeatures(data=features, bin_size=bin_size, factor=factor)
 
 
 def durations_by_act(
-    population: Population, bin_size: int = 15, factor: int = 1440
-) -> dict[str, tuple[ndarray, ndarray]]:
-    features = _collect_by_group(population.acts, population.durations)
-    return weighted_features(features, bin_size=bin_size, factor=factor)
-
-
-def start_times_by_act_plan_seq(
     population: Population,
-) -> dict[str, tuple[ndarray, ndarray]]:
-    features = _collect_by_group(population.seq_key, population.starts)
-    return weighted_features(features, factor=1440)
+    bin_size: int = 15,
+    factor: int = 1440,
+) -> PidFeatures:
+    """Per-pid durations grouped by activity (no occurrence index)."""
+    features = _collect_by_group_with_pids(population.acts, population.durations, population.pids)
+    return PidFeatures(data=features, bin_size=bin_size, factor=factor)
 
 
-def end_times_by_act_plan_seq(
-    population: Population,
-) -> dict[str, tuple[ndarray, ndarray]]:
-    features = _collect_by_group(population.seq_key, population.ends)
-    return weighted_features(features, factor=1440)
-
-
-def end_times_by_act_plan_enum(
-    population: Population,
-) -> dict[str, tuple[ndarray, ndarray]]:
-    features = _collect_by_group(population.act_enum_key, population.ends)
-    return weighted_features(features, factor=1440)
-
-
-def durations_by_act_plan_seq(
-    population: Population,
-) -> dict[str, tuple[ndarray, ndarray]]:
-    features = _collect_by_group(population.seq_key, population.durations)
-    return weighted_features(features, factor=1440)
-
-
-def start_times_by_act_plan_enum_per_pid(
+def start_times_by_act_plan_enum(
     population: Population,
 ) -> PidFeatures:
     features = _collect_by_group_with_pids(
@@ -68,7 +45,7 @@ def start_times_by_act_plan_enum_per_pid(
     return PidFeatures(data=features, bin_size=None, factor=1440)
 
 
-def durations_by_act_plan_enum_per_pid(
+def durations_by_act_plan_enum(
     population: Population,
 ) -> PidFeatures:
     features = _collect_by_group_with_pids(
@@ -77,7 +54,7 @@ def durations_by_act_plan_enum_per_pid(
     return PidFeatures(data=features, bin_size=None, factor=1440)
 
 
-def start_and_duration_by_act_bins_per_pid(
+def start_and_duration_by_act_bins(
     population: Population,
     bin_size: int = 15,
     factor: int = 1440,
@@ -89,7 +66,7 @@ def start_and_duration_by_act_bins_per_pid(
     return PidFeatures(data=features, bin_size=bin_size, factor=factor)
 
 
-def joint_durations_by_act_bins_per_pid(
+def joint_durations_by_act_bins(
     population: Population,
     bin_size: int = 15,
     factor: int = 1440,

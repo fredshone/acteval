@@ -1,99 +1,39 @@
-import numpy as np
 from itertools import combinations_with_replacement
-from numpy import array, ndarray
+
+import numpy as np
 
 from acteval.features._pid_features import PidFeatures
-from acteval.features._utils import (
-    _count_matrix,
-    weighted_features,
-)
+from acteval.features._utils import _count_matrix
 from acteval.population import Population
-
-
-def participation_prob_by_act(
-    population: Population,
-) -> dict[str, tuple[ndarray, ndarray]]:
-    """Calculate the participations by activity for a given population.
-
-    Args:
-        population (Population): The population data.
-
-    Returns:
-        dict[str, tuple[array, array]]: A dictionary containing the participation for each activity.
-    """
-    matrix = population.count_matrix
-    participated = (matrix > 0).sum(axis=0)
-    n = population.n
-    return {
-        act: (array([0, 1]), array([n - participated[j], participated[j]]))
-        for j, act in enumerate(population.unique_acts)
-    }
-
-
-def participation_rates(
-    population: Population,
-) -> dict[str, tuple[ndarray, ndarray]]:
-    return weighted_features({"all": population.pid_counts})
 
 
 def participation_rates_by_seq_act(
     population: Population,
-) -> dict[str, tuple[ndarray, ndarray]]:
+) -> PidFeatures:
+    """Per-pid participation rates keyed by sequence position (e.g. '0home', '1work').
+
+    Each key maps to ``(count_per_person, pids)`` where count is 0 or 1.
+    """
     matrix, _, unique_keys = _count_matrix(population.pids, population.seq_key)
-    return weighted_features({k: matrix[:, j] for j, k in enumerate(unique_keys)})
+    pids = np.arange(population.n)
+    data = {k: (matrix[:, j], pids) for j, k in enumerate(unique_keys)}
+    return PidFeatures(data=data, bin_size=None, factor=1)
 
 
 def participation_rates_by_act_enum(
     population: Population,
-) -> dict[str, tuple[ndarray, ndarray]]:
-    matrix, _, unique_keys = _count_matrix(population.pids, population.act_enum_key)
-    return weighted_features({k: matrix[:, j] for j, k in enumerate(unique_keys)})
+) -> PidFeatures:
+    """Per-pid participation rates keyed by n-th occurrence of each activity (e.g. 'home0', 'home1').
 
-
-def calc_pair_prob(act_counts, pair):
-    a, b = pair
-    if a == b:
-        return (act_counts[a] > 1).sum()
-    return ((act_counts[a] > 0) & (act_counts[b] > 0)).sum()
-
-
-def calc_pair_rate(act_counts, pair):
-    a, b = pair
-    if a == b:
-        return ((act_counts[a] / 2).astype(int)).value_counts().to_dict()
-    return ((act_counts[[a, b]].min(axis=1) / 2).astype(int)).value_counts().to_dict()
-
-
-
-def joint_participation_prob(
-    population: Population,
-) -> dict[str, tuple[ndarray, ndarray]]:
-    """Calculate the participation prob for all pairs of activities in the given population.
-
-    Args:
-        population (Population): A Population containing the population data.
-
-    Returns:
-        dict: A dictionary containing the participation probability for all pairs of activities.
+    Each key maps to ``(count_per_person, pids)`` where count is 0 or 1.
     """
-    matrix = population.count_matrix
-    unique_acts = population.unique_acts
-    act_list = list(unique_acts)
-    act_idx = {a: i for i, a in enumerate(act_list)}
-    n = matrix.shape[0]
-    pairs = combinations_with_replacement(act_list, 2)
-    metric = {}
-    for pair in pairs:
-        ai, bi = act_idx[pair[0]], act_idx[pair[1]]
-        if pair[0] == pair[1]:
-            p = int((matrix[:, ai] > 1).sum())
-        else:
-            p = int(((matrix[:, ai] > 0) & (matrix[:, bi] > 0)).sum())
-        metric["+".join(pair)] = (array([0, 1]), array([n - p, p]))
-    return metric
+    matrix, _, unique_keys = _count_matrix(population.pids, population.act_enum_key)
+    pids = np.arange(population.n)
+    data = {k: (matrix[:, j], pids) for j, k in enumerate(unique_keys)}
+    return PidFeatures(data=data, bin_size=None, factor=1)
 
 
-def participation_rates_by_act_per_pid(
+def participation_rates_by_act(
     population: Population,
 ) -> PidFeatures:
     """Per-pid participation rates by activity.
@@ -101,17 +41,17 @@ def participation_rates_by_act_per_pid(
     Each key maps to ``(count_per_person, pids)`` where *pids* is shared
     across all keys (the dense pid range).
     """
-    matrix = population.count_matrix
+    matrix = population.act_count_matrix
     pids = np.arange(population.n)
     data = {act: (matrix[:, j], pids) for j, act in enumerate(population.unique_acts)}
     return PidFeatures(data=data, bin_size=None, factor=1)
 
 
-def joint_participation_rate_per_pid(
+def joint_participation_rate(
     population: Population,
 ) -> PidFeatures:
     """Per-pid joint participation rates for all activity pairs."""
-    matrix = population.count_matrix
+    matrix = population.act_count_matrix
     unique_acts = population.unique_acts
     act_list = list(unique_acts)
     act_idx = {a: i for i, a in enumerate(act_list)}
@@ -126,3 +66,14 @@ def joint_participation_rate_per_pid(
             vals = np.minimum(matrix[:, ai], matrix[:, bi]) // 2
         data["+".join(pair)] = (vals, pids)
     return PidFeatures(data=data, bin_size=None, factor=1)
+
+
+def sequence_lengths(
+    population: Population,
+) -> PidFeatures:
+    pids = np.arange(population.n)
+    return PidFeatures(
+        data={"sequence lengths": (population.pid_counts, pids)},
+        bin_size=None,
+        factor=1,
+    )

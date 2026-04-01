@@ -18,4 +18,11 @@ Internal helpers (underscore-prefixed):
 - ``_pid_features`` — ``PidFeatures`` dataclass for per-person subsetting
 - ``_utils``        — low-level grouping, compression, and counting helpers
 - ``_discretise``   — time-discretisation into a [P, C, H, W] tensor
+
+Use ``list_features()`` to get a catalogue of all available feature functions::
+
+    from acteval import list_features
+    print(list_features())
 """
+
+from acteval.features.catalogue import list_features as list_features

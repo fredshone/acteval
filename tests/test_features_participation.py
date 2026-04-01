@@ -6,39 +6,6 @@ from acteval.features._utils import equals
 from acteval.population import Population
 
 
-def test_participation_prob_by_act():
-    population = DataFrame(
-        [
-            {"pid": 0, "act": "home"},
-            {"pid": 0, "act": "work"},
-            {"pid": 1, "act": "home"},
-            {"pid": 1, "act": "work"},
-        ]
-    )
-    expected = {
-        "home": (array([0, 1]), array([0, 2])),
-        "work": (array([0, 1]), array([0, 2])),
-    }
-    result = participation.participation_prob_by_act(Population(population))
-    assert equals(result, expected)
-
-
-def test_participation_rates():
-    population = DataFrame(
-        [
-            {"pid": 0, "act": "home"},
-            {"pid": 0, "act": "work"},
-            {"pid": 0, "act": "home"},
-            {"pid": 1, "act": "home"},
-            {"pid": 1, "act": "work"},
-        ]
-    )
-    expected = {"all": (array([2, 3]), array([1, 1]))}
-    result = participation.participation_rates(Population(population))
-    print(result)
-    assert equals(result, expected)
-
-
 def test_participation_rates_by_act():
     population = DataFrame(
         [
@@ -54,11 +21,11 @@ def test_participation_rates_by_act():
         "work": (array([1]), array([2])),
     }
     assert equals(
-        participation.participation_rates_by_act_per_pid(Population(population)).aggregate(), expected
+        participation.participation_rates_by_act(Population(population)).aggregate(), expected
     )
 
 
-def test_act_plan_seq_participation_rates():
+def test_participation_rates_by_seq_act():
     population = DataFrame(
         [
             {"pid": 0, "act": "home"},
@@ -74,11 +41,12 @@ def test_act_plan_seq_participation_rates():
         "2home": (array([0, 1]), array([1, 1])),
     }
     assert equals(
-        participation.participation_rates_by_seq_act(Population(population)), expected
+        participation.participation_rates_by_seq_act(Population(population)).aggregate(),
+        expected,
     )
 
 
-def test_act_seq_participation_rates():
+def test_participation_rates_by_act_enum():
     population = DataFrame(
         [
             {"pid": 0, "act": "home"},
@@ -94,40 +62,6 @@ def test_act_seq_participation_rates():
         "home1": (array([0, 1]), array([1, 1])),
     }
     assert equals(
-        participation.participation_rates_by_act_enum(Population(population)), expected
-    )
-
-
-
-def test_calc_pair_rate():
-    from pandas import DataFrame as DF
-
-    act_counts = DF(
-        {
-            "home": [1, 2, 2, 2, 3],
-            "work": [1, 1, 1, 1, 0],
-            "school": [1, 0, 0, 0, 0],
-        }
-    )
-    pair_rate = participation.calc_pair_rate(act_counts, ("home", "home"))
-    assert pair_rate == {0: 1, 1: 4}
-
-
-def test_participation_pairs():
-    population = DataFrame(
-        [
-            {"pid": 0, "act": "home"},
-            {"pid": 0, "act": "work"},
-            {"pid": 0, "act": "home"},
-            {"pid": 1, "act": "home"},
-            {"pid": 1, "act": "work"},
-        ]
-    )
-    expected = {
-        "home+work": (array([0, 1]), array([0, 2])),
-        "home+home": (array([0, 1]), array([1, 1])),
-        "work+work": (array([0, 1]), array([2, 0])),
-    }
-    assert equals(
-        participation.joint_participation_prob(Population(population)), expected
+        participation.participation_rates_by_act_enum(Population(population)).aggregate(),
+        expected,
     )

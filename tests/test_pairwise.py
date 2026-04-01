@@ -358,7 +358,7 @@ def test_pairwise_spec_custom_metric(three_schedules):
 def test_pairwise_spec_hamming(three_schedules):
     """Hamming spec produces a valid (N, N) distance matrix."""
     def binary_participation(pop):
-        return (pop.count_matrix > 0).astype(np.float64)
+        return (pop.act_count_matrix > 0).astype(np.float64)
 
     spec = PairwiseSpec("hamming_participations", binary_participation, _pairwise_hamming)
     result = pairwise_distances(three_schedules, specs=[spec])
