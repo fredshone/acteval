@@ -4,13 +4,13 @@ import numpy as np
 import pytest
 from pandas import DataFrame
 
-from acteval.population import Population
 from acteval.evaluate import Evaluator
-
+from acteval.population import Population
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_schedule(**kwargs):
     row = {"pid": 1, "act": "home", "start": 0.0, "end": 8.0, "duration": 8.0}
@@ -21,6 +21,7 @@ def _make_schedule(**kwargs):
 # ---------------------------------------------------------------------------
 # Population — pid validation
 # ---------------------------------------------------------------------------
+
 
 def test_population_missing_pid():
     df = DataFrame([{"act": "home", "start": 0, "end": 5, "duration": 5}])
@@ -35,7 +36,9 @@ def test_population_missing_pid_empty_df():
 
 
 def test_population_nan_pid():
-    df = DataFrame([{"pid": None, "act": "home", "start": 0.0, "end": 5.0, "duration": 5.0}])
+    df = DataFrame(
+        [{"pid": None, "act": "home", "start": 0.0, "end": 5.0, "duration": 5.0}]
+    )
     with pytest.raises(ValueError, match="'pid' contains NaN"):
         Population(df)
 
@@ -43,6 +46,7 @@ def test_population_nan_pid():
 # ---------------------------------------------------------------------------
 # Population — timing column dtype / NaN
 # ---------------------------------------------------------------------------
+
 
 def test_population_nonnumeric_start():
     df = _make_schedule(start="8am")
@@ -78,8 +82,11 @@ def test_population_nan_duration():
 # Population — consistency check (all three columns present)
 # ---------------------------------------------------------------------------
 
+
 def test_population_inconsistent_timing():
-    df = DataFrame([{"pid": 1, "act": "home", "start": 0.0, "end": 8.0, "duration": 5.0}])
+    df = DataFrame(
+        [{"pid": 1, "act": "home", "start": 0.0, "end": 8.0, "duration": 5.0}]
+    )
     with pytest.raises(ValueError, match="inconsistent"):
         Population(df)
 
@@ -88,8 +95,11 @@ def test_population_inconsistent_timing():
 # Population — start > end
 # ---------------------------------------------------------------------------
 
+
 def test_population_start_after_end():
-    df = DataFrame([{"pid": 1, "act": "home", "start": 10.0, "end": 5.0, "duration": -5.0}])
+    df = DataFrame(
+        [{"pid": 1, "act": "home", "start": 10.0, "end": 5.0, "duration": -5.0}]
+    )
     with pytest.raises(ValueError, match="start > end"):
         Population(df)
 
@@ -104,6 +114,7 @@ def test_population_start_after_end_via_derivation():
 # ---------------------------------------------------------------------------
 # Population — derivation correctness
 # ---------------------------------------------------------------------------
+
 
 def test_population_derives_duration():
     df = DataFrame([{"pid": 1, "act": "home", "start": 0.0, "end": 8.0}])
@@ -127,6 +138,7 @@ def test_population_derives_start():
 # Evaluator.__init__ — attributes / split_on validation
 # ---------------------------------------------------------------------------
 
+
 def test_evaluator_attributes_without_split_on(observed):
     attrs = DataFrame({"pid": [0, 1], "gender": ["m", "f"]})
     with pytest.raises(ValueError, match="both be provided or both be None"):
@@ -140,7 +152,9 @@ def test_evaluator_split_on_without_attributes(observed):
 
 def test_evaluator_attributes_missing_pid(observed):
     attrs = DataFrame({"gender": ["m", "f"]})
-    with pytest.raises(ValueError, match="target_attributes.*missing required column 'pid'"):
+    with pytest.raises(
+        ValueError, match="target_attributes.*missing required column 'pid'"
+    ):
         Evaluator(observed, target_attributes=attrs, split_on=["gender"])
 
 
@@ -154,6 +168,7 @@ def test_evaluator_split_column_missing(observed):
 # Evaluator.compare_population — attributes validation
 # ---------------------------------------------------------------------------
 
+
 def test_compare_population_attributes_missing_pid(observed, synthetic):
     ev = Evaluator(observed)
     attrs = DataFrame({"__split__": ["all"]})
@@ -164,6 +179,7 @@ def test_compare_population_attributes_missing_pid(observed, synthetic):
 # ---------------------------------------------------------------------------
 # Evaluator — numeric split_on column handling
 # ---------------------------------------------------------------------------
+
 
 def _make_numeric_fixtures():
     """Ten-person schedule + matching attributes for numeric binning tests."""
@@ -235,6 +251,6 @@ def test_out_of_range_synthetic_gets_label():
         warnings.simplefilter("always")
         ev = Evaluator(schedule, target_attrs, ["age"])
     synth_binned = ev._apply_numeric_bins(synth_attrs)
-    assert "nan" not in synth_binned["age"].str.lower().values, (
-        "Out-of-range synthetic age should be assigned a bin, not NaN"
-    )
+    assert (
+        "nan" not in synth_binned["age"].str.lower().values
+    ), "Out-of-range synthetic age should be assigned a bin, not NaN"

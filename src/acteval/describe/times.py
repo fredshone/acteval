@@ -4,15 +4,16 @@ import numpy as np
 from matplotlib import colormaps, patches
 from matplotlib import pyplot as plt
 from matplotlib.figure import Axes, Figure
-from pandas import DataFrame
 
 from acteval.describe.utils import _to_population
-from acteval.features.times import durations_by_act, end_times_by_act, start_times_by_act
+from acteval.features.times import (
+    durations_by_act,
+    end_times_by_act,
+    start_times_by_act,
+)
 
 
-def times_distributions_plot(
-    observed, ys: Optional[dict], **kwargs
-) -> Figure:
+def times_distributions_plot(observed, ys: Optional[dict], **kwargs) -> Figure:
     pop_obs = _to_population(observed)
     act_order = np.argsort(pop_obs.act_count_matrix.sum(0))[::-1]
     acts = [pop_obs.unique_acts[i] for i in act_order]
@@ -144,9 +145,7 @@ def _times_plot(
     axs[3][0].set_ylabel("Duration\nDensities", fontsize=10)
 
 
-def joint_time_distributions_plot(
-    observed, ys: Optional[dict], **kwargs
-) -> Figure:
+def joint_time_distributions_plot(observed, ys: Optional[dict], **kwargs) -> Figure:
     if ys is None:
         ys = dict()
     pop_obs = _to_population(observed)

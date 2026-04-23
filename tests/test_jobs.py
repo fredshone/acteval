@@ -30,7 +30,6 @@ def test_timing_jobs_have_missing_distance():
             assert spec.missing_distance is None
 
 
-
 def test_job_names_are_unique_within_domain():
     jobs, _, _ = get_jobs()
     seen = set()

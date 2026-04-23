@@ -1,16 +1,14 @@
 """Tests that polars DataFrames are accepted wherever pandas DataFrames are."""
 
 import pytest
-
-pl = pytest.importorskip("polars")
-
 from pandas import DataFrame
 from pandas.testing import assert_frame_equal
 
-from acteval import compare, Evaluator
+from acteval import Evaluator, compare
 from acteval._compat import _coerce_to_pandas, _is_dataframe
 from acteval.population import Population
 
+pl = pytest.importorskip("polars")
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -106,7 +104,9 @@ def test_population_from_polars(pl_observed, pd_observed):
 def test_compare_polars_both(pl_observed, pl_synthetic, pd_observed, pd_synthetic):
     result_pl = compare(pl_observed, pl_synthetic)
     result_pd = compare(pd_observed, pd_synthetic)
-    assert_frame_equal(result_pl.domains.combined.distances, result_pd.domains.combined.distances)
+    assert_frame_equal(
+        result_pl.domains.combined.distances, result_pd.domains.combined.distances
+    )
 
 
 def test_compare_polars_observed_pandas_synthetic(
@@ -114,7 +114,9 @@ def test_compare_polars_observed_pandas_synthetic(
 ):
     result_mixed = compare(pl_observed, pd_synthetic)
     result_pd = compare(pd_observed, pd_synthetic)
-    assert_frame_equal(result_mixed.domains.combined.distances, result_pd.domains.combined.distances)
+    assert_frame_equal(
+        result_mixed.domains.combined.distances, result_pd.domains.combined.distances
+    )
 
 
 def test_compare_pandas_observed_polars_synthetic(
@@ -122,13 +124,17 @@ def test_compare_pandas_observed_polars_synthetic(
 ):
     result_mixed = compare(pd_observed, pl_synthetic)
     result_pd = compare(pd_observed, pd_synthetic)
-    assert_frame_equal(result_mixed.domains.combined.distances, result_pd.domains.combined.distances)
+    assert_frame_equal(
+        result_mixed.domains.combined.distances, result_pd.domains.combined.distances
+    )
 
 
 def test_compare_polars_dict(pl_observed, pl_synthetic, pd_observed, pd_synthetic):
     result_pl = compare(pl_observed, {"m": pl_synthetic})
     result_pd = compare(pd_observed, {"m": pd_synthetic})
-    assert_frame_equal(result_pl.domains.combined.distances, result_pd.domains.combined.distances)
+    assert_frame_equal(
+        result_pl.domains.combined.distances, result_pd.domains.combined.distances
+    )
 
 
 # ---------------------------------------------------------------------------

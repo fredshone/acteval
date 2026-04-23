@@ -22,6 +22,7 @@ Provides two groups of functions:
    your own list of ``(domain, feature, segment, ...)`` tuples to override the
    defaults.
 """
+
 import numpy as np
 from numpy import ndarray
 from pandas import DataFrame, Series
@@ -121,7 +122,9 @@ def average(
     """Weighted average; ``fill_empty`` is returned for labels with no observations."""
     weighted_avg = {}
     for k, (v, w) in features.items():
-        weighted_avg[k] = np.average(v, axis=0, weights=w).sum() if w.sum() > 0 else fill_empty
+        weighted_avg[k] = (
+            np.average(v, axis=0, weights=w).sum() if w.sum() > 0 else fill_empty
+        )
     return Series(weighted_avg, dtype=float)
 
 
@@ -162,7 +165,11 @@ def descriptions_to_group_level(
               to skip filtering.
     """
     grouper = ["domain", "feature"] + extra
-    rf = descriptions if isinstance(descriptions, ResultFrame) else ResultFrame.from_wide(descriptions)
+    rf = (
+        descriptions
+        if isinstance(descriptions, ResultFrame)
+        else ResultFrame.from_wide(descriptions)
+    )
     if drop:
         rf = rf.drop_rows(drop)
     group_rf = rf.aggregate(grouper)
@@ -187,7 +194,11 @@ def distances_to_group_level(
               to skip filtering.
     """
     grouper = ["domain", "feature"] + extra
-    rf = distances if isinstance(distances, ResultFrame) else ResultFrame.from_wide(distances)
+    rf = (
+        distances
+        if isinstance(distances, ResultFrame)
+        else ResultFrame.from_wide(distances)
+    )
     if drop:
         rf = rf.drop_rows(drop)
     group_rf = rf.aggregate_distances(grouper)

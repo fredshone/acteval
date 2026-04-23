@@ -2,8 +2,8 @@ import re
 
 import numpy as np
 
-from acteval.features._pid_features import PidFeatures
 from acteval._jobs import JobSpec, get_jobs
+from acteval.features._pid_features import PidFeatures
 
 _TRAILING_DIGITS = re.compile(r"\d+$")
 
@@ -12,7 +12,6 @@ def _get_density_jobs(config_path=None) -> list[JobSpec]:
     """Return flat list of JobSpec for all active density jobs."""
     jobs, _, _ = get_jobs(config_path)
     return jobs
-
 
 
 def _key_activities(key: str) -> frozenset[str] | None:

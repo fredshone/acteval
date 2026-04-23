@@ -26,7 +26,6 @@ from acteval.features.participation import participation_rates_by_act
 from acteval.features.transitions import ngrams
 from acteval.population import Population
 
-
 # ---------------------------------------------------------------------------
 # Low-level helpers (reused by feature wrappers and tests)
 # ---------------------------------------------------------------------------

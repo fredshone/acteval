@@ -1,9 +1,8 @@
 from numpy import array
 from pandas import DataFrame
 
-from acteval.features import transitions
-from acteval.features.transitions import full_sequences, ngrams
 from acteval.features._utils import equals
+from acteval.features.transitions import full_sequences, ngrams
 from acteval.population import Population
 
 

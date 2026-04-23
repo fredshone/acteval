@@ -64,15 +64,17 @@ def plot_agg_acts(
     legend=True,
     **kwargs,
 ):
-    interval = kwargs.pop("interval", 240)
+    kwargs.pop("interval", 240)
     pop = _to_population(population)
-    df = pd.DataFrame({
-        "pid": pop.pids,
-        "act": pop.acts,
-        "start": pop.starts,
-        "end": pop.ends,
-        "duration": pop.durations,
-    })
+    df = pd.DataFrame(
+        {
+            "pid": pop.pids,
+            "act": pop.acts,
+            "start": pop.starts,
+            "end": pop.ends,
+            "duration": pop.durations,
+        }
+    )
     bins = binned_activity_density(
         df, duration=duration, step=step, class_map=class_map
     )
@@ -84,7 +86,9 @@ def plot_agg_acts(
         datetime(2021, 11, 1, 0) + timedelta(minutes=i * step)
         for i in range(len(df_plot.index))
     ]
-    fig = df_plot.plot(kind="bar", stacked=True, width=1, ax=ax, legend=legend, **kwargs)
+    fig = df_plot.plot(
+        kind="bar", stacked=True, width=1, ax=ax, legend=legend, **kwargs
+    )
     if legend:
         ax.legend(loc="upper right")
     ax = fig.axes

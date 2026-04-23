@@ -25,7 +25,9 @@ SIZES = [
 ]
 
 
-def generate_population(n_rows: int, n_activities: int = 5, seed: int = 42) -> DataFrame:
+def generate_population(
+    n_rows: int, n_activities: int = 5, seed: int = 42
+) -> DataFrame:
     """Generate a synthetic schedule population with approximately n_rows rows.
 
     Fully vectorized: all person/episode decisions are made in bulk numpy
@@ -68,7 +70,15 @@ def generate_population(n_rows: int, n_activities: int = 5, seed: int = 42) -> D
     starts = np.concatenate(start_groups)
     ends = starts + durations
 
-    return DataFrame({"pid": pids, "act": act_col, "start": starts, "end": ends, "duration": durations})
+    return DataFrame(
+        {
+            "pid": pids,
+            "act": act_col,
+            "start": starts,
+            "end": ends,
+            "duration": durations,
+        }
+    )
 
 
 @pytest.fixture(params=SIZES, scope="session")

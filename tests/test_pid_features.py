@@ -245,8 +245,16 @@ def test_compare_splits_runs():
         split_on=["gender"],
     )
     assert result.has_splits
-    assert result.features.combined.distances.index.names == ["domain", "feature", "segment"]
-    assert result.groups.by_attribute.distances.index.names == ["domain", "feature", "label"]
+    assert result.features.combined.distances.index.names == [
+        "domain",
+        "feature",
+        "segment",
+    ]
+    assert result.groups.by_attribute.distances.index.names == [
+        "domain",
+        "feature",
+        "label",
+    ]
 
 
 def test_evaluator_compare_splits():
@@ -257,7 +265,11 @@ def test_evaluator_compare_splits():
         synthetic_attributes={"m": synth_attrs},
     )
     assert result.has_splits
-    assert result.groups.by_attribute.distances.index.names == ["domain", "feature", "label"]
+    assert result.groups.by_attribute.distances.index.names == [
+        "domain",
+        "feature",
+        "label",
+    ]
 
 
 def test_compare_splits_two_models():
@@ -283,7 +295,11 @@ def test_compare_population_and_report():
     evaluator.compare_population("m", synthetic, synth_attrs)
     result = evaluator.report()
     assert result.has_splits
-    assert result.groups.by_attribute.distances.index.names == ["domain", "feature", "label"]
+    assert result.groups.by_attribute.distances.index.names == [
+        "domain",
+        "feature",
+        "label",
+    ]
 
 
 def test_compare_population_no_attributes_no_splits():

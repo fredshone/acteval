@@ -36,6 +36,7 @@ Each ``JobSpec`` carries a ``missing_distance`` value:
   from synthetic schedules.
 - ``None`` (participation, transitions): EMD is computed on whatever data exists.
 """
+
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
@@ -43,16 +44,9 @@ from typing import Callable
 import numpy as np
 from pandas import DataFrame, MultiIndex, Series, concat
 
-from acteval._aggregation import (
-    _REMOVE_FEATURES,
-    _REMOVE_GROUPS,
-    _drop_features,
-    distance_weighted_average,
-    weighted_average,
-)
+from acteval._jobs import JobSpec
 from acteval._result_frame import ResultFrame
 from acteval.features import creativity, structural
-from acteval._jobs import JobSpec
 from acteval.population import Population
 
 
@@ -115,6 +109,7 @@ def describe(descriptions: DataFrame, distances: DataFrame) -> dict[str, DataFra
         "domain_distances": domain_dist,
     }
 
+
 _PARALLEL_THRESHOLD = 50
 
 
@@ -123,9 +118,7 @@ _PARALLEL_THRESHOLD = 50
 # ---------------------------------------------------------------------------
 
 
-def _observed_base(
-    spec: JobSpec, observed_features: dict
-) -> tuple[DataFrame, tuple]:
+def _observed_base(spec: JobSpec, observed_features: dict) -> tuple[DataFrame, tuple]:
     """Build the observed-only base rows for a feature spec.
 
     Returns (base_df, default) where base_df has columns {observed__weight,
@@ -136,7 +129,9 @@ def _observed_base(
     observed_weight = spec.size_fn(observed_features)
     observed_weight.name = "observed__weight"
     description_observed = spec.describe_fn(observed_features)
-    base = DataFrame({"observed__weight": observed_weight, "observed": description_observed})
+    base = DataFrame(
+        {"observed__weight": observed_weight, "observed": description_observed}
+    )
     base = base.sort_values(ascending=False, by=["observed__weight", "observed"])
     return base, default
 
@@ -153,7 +148,12 @@ def _model_contribution(
     synth_weight.name = f"{model}__weight"
     desc = _describe_feature(model, synth_features, spec.describe_fn)
     dist = _score_features(
-        model, obs_features, synth_features, spec.distance_fn, default, spec.missing_distance
+        model,
+        obs_features,
+        synth_features,
+        spec.distance_fn,
+        default,
+        spec.missing_distance,
     )
     return synth_weight, desc, dist
 
@@ -273,9 +273,10 @@ def _model_cols_structural(
             this (split, cat) subset — i.e. synthetic persons whose sequence is
             not already present in the corresponding target subset.
     """
-    weights, metrics = structural.feasibility_aggregate(per_pid_flags, novel_dense_pids, model)
+    weights, metrics = structural.feasibility_aggregate(
+        per_pid_flags, novel_dense_pids, model
+    )
     return concat([weights, metrics], axis=1)
-
 
 
 def _describe_feature(

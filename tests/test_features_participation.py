@@ -21,7 +21,8 @@ def test_participation_rates_by_act():
         "work": (array([1]), array([2])),
     }
     assert equals(
-        participation.participation_rates_by_act(Population(population)).aggregate(), expected
+        participation.participation_rates_by_act(Population(population)).aggregate(),
+        expected,
     )
 
 
@@ -41,7 +42,9 @@ def test_participation_rates_by_seq_act():
         "2home": (array([0, 1]), array([1, 1])),
     }
     assert equals(
-        participation.participation_rates_by_seq_act(Population(population)).aggregate(),
+        participation.participation_rates_by_seq_act(
+            Population(population)
+        ).aggregate(),
         expected,
     )
 
@@ -62,6 +65,8 @@ def test_participation_rates_by_act_enum():
         "home1": (array([0, 1]), array([1, 1])),
     }
     assert equals(
-        participation.participation_rates_by_act_enum(Population(population)).aggregate(),
+        participation.participation_rates_by_act_enum(
+            Population(population)
+        ).aggregate(),
         expected,
     )

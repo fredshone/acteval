@@ -1,10 +1,10 @@
 from numpy import array
 from pandas import DataFrame, Series
 
-from acteval.features.times import start_times_by_act
-from acteval.distance.scalar import mae
 from acteval._pipeline import _make_default, _score_features
+from acteval.distance.scalar import mae
 from acteval.evaluate import compare
+from acteval.features.times import start_times_by_act
 from acteval.population import Population
 
 

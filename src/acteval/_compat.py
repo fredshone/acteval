@@ -21,10 +21,9 @@ def _coerce_to_pandas(df) -> DataFrame:
     if cls.__module__.startswith("polars"):
         # Convert column-by-column via Python lists to avoid a pyarrow dependency.
         import pandas as pd
+
         return pd.DataFrame({col: df[col].to_list() for col in df.columns})
-    raise TypeError(
-        f"Expected a pandas or Polars DataFrame, got {cls.__qualname__}"
-    )
+    raise TypeError(f"Expected a pandas or Polars DataFrame, got {cls.__qualname__}")
 
 
 def _is_dataframe(x) -> bool:

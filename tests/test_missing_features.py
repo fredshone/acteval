@@ -5,21 +5,25 @@ from acteval.evaluate import compare
 
 def _observed():
     # Two people: pid 0 has work, pid 1 does not — 50% participation rate
-    return DataFrame([
-        {"pid": 0, "act": "home", "start": 0, "end": 6, "duration": 6},
-        {"pid": 0, "act": "work", "start": 6, "end": 14, "duration": 8},
-        {"pid": 0, "act": "home", "start": 14, "end": 24, "duration": 10},
-        {"pid": 1, "act": "home", "start": 0, "end": 24, "duration": 24},
-    ])
+    return DataFrame(
+        [
+            {"pid": 0, "act": "home", "start": 0, "end": 6, "duration": 6},
+            {"pid": 0, "act": "work", "start": 6, "end": 14, "duration": 8},
+            {"pid": 0, "act": "home", "start": 14, "end": 24, "duration": 10},
+            {"pid": 1, "act": "home", "start": 0, "end": 24, "duration": 24},
+        ]
+    )
 
 
 def _synthetic():
     # No work activity — has shop instead
-    return DataFrame([
-        {"pid": 0, "act": "home", "start": 0, "end": 6, "duration": 6},
-        {"pid": 0, "act": "shop", "start": 6, "end": 14, "duration": 8},
-        {"pid": 0, "act": "home", "start": 14, "end": 24, "duration": 10},
-    ])
+    return DataFrame(
+        [
+            {"pid": 0, "act": "home", "start": 0, "end": 6, "duration": 6},
+            {"pid": 0, "act": "shop", "start": 6, "end": 14, "duration": 8},
+            {"pid": 0, "act": "home", "start": 14, "end": 24, "duration": 10},
+        ]
+    )
 
 
 def test_timing_distance_for_absent_activity_is_one():

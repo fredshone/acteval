@@ -26,7 +26,9 @@ def test_start_times_by_act():
         "home": (array([0.5, 6.5]), array([2, 1])),
         "work": (array([1.5, 2.5]), array([1, 1])),
     }
-    assert equals(times.start_times_by_act(pop, bin_size=1, factor=1).aggregate(), expected)
+    assert equals(
+        times.start_times_by_act(pop, bin_size=1, factor=1).aggregate(), expected
+    )
 
 
 def test_end_times_by_act():
@@ -35,7 +37,9 @@ def test_end_times_by_act():
         "home": (array([1.5, 2.5, 8.5]), array([1, 1, 1])),
         "work": (array([6.5, 8.5]), array([1, 1])),
     }
-    assert equals(times.end_times_by_act(pop, bin_size=1, factor=1).aggregate(), expected)
+    assert equals(
+        times.end_times_by_act(pop, bin_size=1, factor=1).aggregate(), expected
+    )
 
 
 def test_durations_by_act():
@@ -44,7 +48,9 @@ def test_durations_by_act():
         "home": (array([1.5, 2.5]), array([1, 2])),
         "work": (array([4.5, 7.5]), array([1, 1])),
     }
-    assert equals(times.durations_by_act(pop, bin_size=1, factor=1).aggregate(), expected)
+    assert equals(
+        times.durations_by_act(pop, bin_size=1, factor=1).aggregate(), expected
+    )
 
 
 def test_start_and_duration_by_act_bins():
@@ -88,7 +94,9 @@ def test_start_times_by_act_plan_enum():
         "work0": (array([1, 2]) / 1440, array([1, 1])),
         "home1": (array([6]) / 1440, array([1])),
     }
-    assert equals(times.start_times_by_act_plan_enum(Population(population)).aggregate(), expected)
+    assert equals(
+        times.start_times_by_act_plan_enum(Population(population)).aggregate(), expected
+    )
 
 
 def test_durations_by_act_plan_enum():
@@ -106,7 +114,9 @@ def test_durations_by_act_plan_enum():
         "work0": (array([1, 2]) / 1440, array([1, 1])),
         "home1": (array([6]) / 1440, array([1])),
     }
-    assert equals(times.durations_by_act_plan_enum(Population(population)).aggregate(), expected)
+    assert equals(
+        times.durations_by_act_plan_enum(Population(population)).aggregate(), expected
+    )
 
 
 def test_joint_durations_by_act():
@@ -124,7 +134,9 @@ def test_joint_durations_by_act():
         "work": (array([[2.5, 6.5]]), array([1])),
     }
     assert equals(
-        times.joint_durations_by_act_bins(Population(population), bin_size=1, factor=1).aggregate(),
+        times.joint_durations_by_act_bins(
+            Population(population), bin_size=1, factor=1
+        ).aggregate(),
         expected,
     )
 
@@ -144,6 +156,8 @@ def test_joint_durations_by_act_binned():
         "work": (array([[2, 6]]), array([1])),
     }
     assert equals(
-        times.joint_durations_by_act_bins(Population(population), bin_size=4, factor=1).aggregate(),
+        times.joint_durations_by_act_bins(
+            Population(population), bin_size=4, factor=1
+        ).aggregate(),
         expected,
     )

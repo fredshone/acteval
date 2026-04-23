@@ -50,7 +50,15 @@ def generate_schedules(n_persons: int, seed: int = 42) -> DataFrame:
     starts = np.concatenate(start_groups)
     ends = starts + durations
 
-    return DataFrame({"pid": pids, "act": act_col, "start": starts, "end": ends, "duration": durations})
+    return DataFrame(
+        {
+            "pid": pids,
+            "act": act_col,
+            "start": starts,
+            "end": ends,
+            "duration": durations,
+        }
+    )
 
 
 @pytest.fixture(params=SIZES, scope="session")

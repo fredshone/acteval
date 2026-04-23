@@ -3,7 +3,6 @@ import pytest
 from pandas import DataFrame
 
 from acteval.pairwise import (
-    PairwiseResult,
     PairwiseSpec,
     _extract_feature_matrix,
     _mean_duration_per_act_per_pid,
@@ -15,14 +14,12 @@ from acteval.pairwise import (
     _participation_feature_matrix,
     _sequence_feature_matrix,
     _timing_feature_matrix,
-    _transition_feature_matrix,
     chamfer_spec,
     default_pairwise_specs,
     pairwise_distances,
     soft_dtw_spec,
 )
 from acteval.population import Population
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -52,11 +49,14 @@ def three_schedules():
 @pytest.fixture
 def identical_schedules():
     """Two identical schedules."""
-    row = lambda pid: [
-        {"pid": pid, "act": "home", "start": 0, "end": 8, "duration": 8},
-        {"pid": pid, "act": "work", "start": 8, "end": 16, "duration": 8},
-        {"pid": pid, "act": "home", "start": 16, "end": 24, "duration": 8},
-    ]
+
+    def row(pid):
+        return [
+            {"pid": pid, "act": "home", "start": 0, "end": 8, "duration": 8},
+            {"pid": pid, "act": "work", "start": 8, "end": 16, "duration": 8},
+            {"pid": pid, "act": "home", "start": 16, "end": 24, "duration": 8},
+        ]
+
     return DataFrame(row(0) + row(1))
 
 
@@ -319,9 +319,7 @@ def test_pairwise_distances_to_dataframe(three_schedules):
 
 
 def test_pairwise_distances_single_pid_raises():
-    df = DataFrame(
-        [{"pid": 0, "act": "home", "start": 0, "end": 24, "duration": 24}]
-    )
+    df = DataFrame([{"pid": 0, "act": "home", "start": 0, "end": 24, "duration": 24}])
     with pytest.raises(ValueError, match="at least 2"):
         pairwise_distances(df)
 
@@ -339,12 +337,15 @@ def test_pairwise_distances_repr(three_schedules):
 def test_pairwise_distances_default_specs_unchanged(three_schedules):
     """Calling with default specs explicitly gives identical results."""
     result_default = pairwise_distances(three_schedules)
-    result_explicit = pairwise_distances(three_schedules, specs=default_pairwise_specs())
+    result_explicit = pairwise_distances(
+        three_schedules, specs=default_pairwise_specs()
+    )
     np.testing.assert_array_almost_equal(result_default.matrix, result_explicit.matrix)
 
 
 def test_pairwise_spec_custom_metric(three_schedules):
     """A custom distance_fn (all-zeros) produces an all-zeros matrix."""
+
     def zero_dist(matrix, chunk_size):
         n = matrix.shape[0]
         return np.zeros((n, n), dtype=np.float64)
@@ -357,10 +358,13 @@ def test_pairwise_spec_custom_metric(three_schedules):
 
 def test_pairwise_spec_hamming(three_schedules):
     """Hamming spec produces a valid (N, N) distance matrix."""
+
     def binary_participation(pop):
         return (pop.act_count_matrix > 0).astype(np.float64)
 
-    spec = PairwiseSpec("hamming_participations", binary_participation, _pairwise_hamming)
+    spec = PairwiseSpec(
+        "hamming_participations", binary_participation, _pairwise_hamming
+    )
     result = pairwise_distances(three_schedules, specs=[spec])
     dist = result.matrix
     assert dist.shape == (3, 3)
@@ -374,7 +378,9 @@ def test_pairwise_weights(three_schedules):
     """Weighted average of two specs matches manual calculation."""
     part_result = pairwise_distances(
         three_schedules,
-        specs=[PairwiseSpec("p", _participation_feature_matrix, _pairwise_mae, weight=1.0)],
+        specs=[
+            PairwiseSpec("p", _participation_feature_matrix, _pairwise_mae, weight=1.0)
+        ],
     )
     timing_result = pairwise_distances(
         three_schedules,

@@ -6,9 +6,7 @@ from acteval.features._pid_features import PidFeatures
 from acteval.population import Population
 
 
-def ngrams(
-    population: Population, n: int, min_count: int = 0
-) -> PidFeatures:
+def ngrams(population: Population, n: int, min_count: int = 0) -> PidFeatures:
     """Build per-pid n-gram transition features returning PidFeatures.
 
     Uses the same integer-encoding logic as ``_build_ngrams`` but keeps

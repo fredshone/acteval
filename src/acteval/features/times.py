@@ -1,5 +1,4 @@
 import numpy as np
-from numpy import ndarray
 
 from acteval.features._pid_features import PidFeatures
 from acteval.features._utils import _collect_by_group_with_pids
@@ -12,7 +11,9 @@ def start_times_by_act(
     factor: int = 1440,
 ) -> PidFeatures:
     """Per-pid start times grouped by activity (no occurrence index)."""
-    features = _collect_by_group_with_pids(population.acts, population.starts, population.pids)
+    features = _collect_by_group_with_pids(
+        population.acts, population.starts, population.pids
+    )
     return PidFeatures(data=features, bin_size=bin_size, factor=factor)
 
 
@@ -22,7 +23,9 @@ def end_times_by_act(
     factor: int = 1440,
 ) -> PidFeatures:
     """Per-pid end times grouped by activity (no occurrence index)."""
-    features = _collect_by_group_with_pids(population.acts, population.ends, population.pids)
+    features = _collect_by_group_with_pids(
+        population.acts, population.ends, population.pids
+    )
     return PidFeatures(data=features, bin_size=bin_size, factor=factor)
 
 
@@ -32,7 +35,9 @@ def durations_by_act(
     factor: int = 1440,
 ) -> PidFeatures:
     """Per-pid durations grouped by activity (no occurrence index)."""
-    features = _collect_by_group_with_pids(population.acts, population.durations, population.pids)
+    features = _collect_by_group_with_pids(
+        population.acts, population.durations, population.pids
+    )
     return PidFeatures(data=features, bin_size=bin_size, factor=factor)
 
 

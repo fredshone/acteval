@@ -1,20 +1,19 @@
 from numpy import array
 from pandas import DataFrame, MultiIndex, Series, concat
 
-from acteval import evaluate
-from acteval._pipeline import describe
-from acteval.features._utils import equals
 from acteval._aggregation import (
     descriptions_to_domain_level,
     descriptions_to_group_level,
     distances_to_domain_level,
     distances_to_group_level,
 )
-from acteval.population import Population
+from acteval._pipeline import describe
+from acteval.features._utils import equals
 from acteval.features.structural import (
     feasibility_eval,
     time_consistency,
 )
+from acteval.population import Population
 
 
 def test_time_consistency():
@@ -30,11 +29,14 @@ def test_time_consistency():
     result = time_consistency(Population(population), target=30).aggregate()
     assert set(result.keys()) == {"starts at 0", "ends at 30", "duration is 30"}
     # Both persons start at 0 → only value 1, count 2
-    assert equals(result, {
-        "starts at 0": (array([1.]), array([2])),
-        "ends at 30": (array([0., 1.]), array([1, 1])),
-        "duration is 30": (array([0., 1.]), array([1, 1])),
-    })
+    assert equals(
+        result,
+        {
+            "starts at 0": (array([1.0]), array([2])),
+            "ends at 30": (array([0.0, 1.0]), array([1, 1])),
+            "duration is 30": (array([0.0, 1.0]), array([1, 1])),
+        },
+    )
 
 
 def test_feasibility_eval():

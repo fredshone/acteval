@@ -14,6 +14,7 @@ Usage in aggregation functions::
     domain_rf = group_rf.mean(["domain"])
     result_df = domain_rf.to_wide()
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

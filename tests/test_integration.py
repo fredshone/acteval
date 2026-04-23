@@ -6,11 +6,11 @@ _pipeline.py, and evaluate.py.
 
 The `observed` and `synthetic` fixtures come from conftest.py.
 """
+
 import pytest
 from pandas import DataFrame
 
-from acteval.evaluate import Evaluator, SplitNotAvailableError, compare, compare_splits
-
+from acteval.evaluate import Evaluator, SplitNotAvailableError, compare
 
 # ---------------------------------------------------------------------------
 # Extra fixtures for split-based tests
@@ -39,7 +39,11 @@ class TestNoSplitsSchema:
 
     def test_features_combined_index_names(self, observed, synthetic):
         result = compare(observed, {"m": synthetic})
-        assert result.features.combined.distances.index.names == ["domain", "feature", "segment"]
+        assert result.features.combined.distances.index.names == [
+            "domain",
+            "feature",
+            "segment",
+        ]
 
     def test_groups_combined_index_names(self, observed, synthetic):
         result = compare(observed, {"m": synthetic})
@@ -60,8 +64,12 @@ class TestNoSplitsSchema:
 
     def test_no_weight_columns_in_distances(self, observed, synthetic):
         result = compare(observed, {"m": synthetic})
-        assert not any(c.endswith("__weight") for c in result.features.combined.distances.columns)
-        assert not any(c.endswith("__weight") for c in result.groups.combined.distances.columns)
+        assert not any(
+            c.endswith("__weight") for c in result.features.combined.distances.columns
+        )
+        assert not any(
+            c.endswith("__weight") for c in result.groups.combined.distances.columns
+        )
 
     def test_domains_no_weight_or_unit_columns(self, observed, synthetic):
         result = compare(observed, {"m": synthetic})
@@ -95,7 +103,11 @@ class TestNoSplitsSchema:
 
     def test_features_descriptions_index_names(self, observed, synthetic):
         result = compare(observed, {"m": synthetic})
-        assert result.features.combined.descriptions.index.names == ["domain", "feature", "segment"]
+        assert result.features.combined.descriptions.index.names == [
+            "domain",
+            "feature",
+            "segment",
+        ]
 
     def test_groups_descriptions_index_names(self, observed, synthetic):
         result = compare(observed, {"m": synthetic})
@@ -141,29 +153,27 @@ class TestNoSplitsSchema:
 
 class TestWithSplitsSchema:
     def test_has_splits_true(self, observed, synthetic, obs_attrs, synth_attrs):
-        evaluator = Evaluator(
-            observed, target_attributes=obs_attrs, split_on=["group"]
-        )
+        evaluator = Evaluator(observed, target_attributes=obs_attrs, split_on=["group"])
         result = evaluator.compare({"m": synthetic}, attributes={"m": synth_attrs})
         assert result.has_splits is True
 
     def test_features_by_category_five_level_index(
         self, observed, synthetic, obs_attrs, synth_attrs
     ):
-        evaluator = Evaluator(
-            observed, target_attributes=obs_attrs, split_on=["group"]
-        )
+        evaluator = Evaluator(observed, target_attributes=obs_attrs, split_on=["group"])
         result = evaluator.compare({"m": synthetic}, attributes={"m": synth_attrs})
         assert result.features.by_category.distances.index.names == [
-            "domain", "feature", "segment", "label", "cat",
+            "domain",
+            "feature",
+            "segment",
+            "label",
+            "cat",
         ]
 
     def test_features_by_category_has_expected_categories(
         self, observed, synthetic, obs_attrs, synth_attrs
     ):
-        evaluator = Evaluator(
-            observed, target_attributes=obs_attrs, split_on=["group"]
-        )
+        evaluator = Evaluator(observed, target_attributes=obs_attrs, split_on=["group"])
         result = evaluator.compare({"m": synthetic}, attributes={"m": synth_attrs})
         cats = set(
             result.features.by_category.distances.index.get_level_values("cat").unique()
@@ -173,48 +183,49 @@ class TestWithSplitsSchema:
     def test_domains_by_attribute_two_level_index(
         self, observed, synthetic, obs_attrs, synth_attrs
     ):
-        evaluator = Evaluator(
-            observed, target_attributes=obs_attrs, split_on=["group"]
-        )
+        evaluator = Evaluator(observed, target_attributes=obs_attrs, split_on=["group"])
         result = evaluator.compare({"m": synthetic}, attributes={"m": synth_attrs})
         assert result.domains.by_attribute.distances.index.names == ["domain", "label"]
 
     def test_domains_by_category_three_level_index(
         self, observed, synthetic, obs_attrs, synth_attrs
     ):
-        evaluator = Evaluator(
-            observed, target_attributes=obs_attrs, split_on=["group"]
-        )
+        evaluator = Evaluator(observed, target_attributes=obs_attrs, split_on=["group"])
         result = evaluator.compare({"m": synthetic}, attributes={"m": synth_attrs})
-        assert result.domains.by_category.distances.index.names == ["domain", "label", "cat"]
+        assert result.domains.by_category.distances.index.names == [
+            "domain",
+            "label",
+            "cat",
+        ]
 
     def test_features_by_attribute_four_level_index(
         self, observed, synthetic, obs_attrs, synth_attrs
     ):
-        evaluator = Evaluator(
-            observed, target_attributes=obs_attrs, split_on=["group"]
-        )
+        evaluator = Evaluator(observed, target_attributes=obs_attrs, split_on=["group"])
         result = evaluator.compare({"m": synthetic}, attributes={"m": synth_attrs})
         assert result.features.by_attribute.distances.index.names == [
-            "domain", "feature", "segment", "label",
+            "domain",
+            "feature",
+            "segment",
+            "label",
         ]
 
     def test_combined_collapses_over_splits(
         self, observed, synthetic, obs_attrs, synth_attrs
     ):
         """Combined distances should have no label/cat index levels."""
-        evaluator = Evaluator(
-            observed, target_attributes=obs_attrs, split_on=["group"]
-        )
+        evaluator = Evaluator(observed, target_attributes=obs_attrs, split_on=["group"])
         result = evaluator.compare({"m": synthetic}, attributes={"m": synth_attrs})
-        assert result.features.combined.distances.index.names == ["domain", "feature", "segment"]
+        assert result.features.combined.distances.index.names == [
+            "domain",
+            "feature",
+            "segment",
+        ]
 
     def test_split_domain_distances_in_range(
         self, observed, synthetic, obs_attrs, synth_attrs
     ):
-        evaluator = Evaluator(
-            observed, target_attributes=obs_attrs, split_on=["group"]
-        )
+        evaluator = Evaluator(observed, target_attributes=obs_attrs, split_on=["group"])
         result = evaluator.compare({"m": synthetic}, attributes={"m": synth_attrs})
         vals = result.domains.by_attribute.distances["m"]
         assert (vals >= 0).all()

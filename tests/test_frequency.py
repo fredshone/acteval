@@ -1,13 +1,13 @@
 from numpy import array, array_equal
 from pandas import DataFrame
 
+from acteval.features._utils import equals
 from acteval.features.frequency import (
     activity_densities,
     activity_frequencies,
     binned_activity_count,
     binned_activity_density,
 )
-from acteval.features._utils import equals
 
 
 def test_activity_count_bins():

@@ -12,9 +12,7 @@ from acteval.describe.utils import _to_population
 from acteval.features.transitions import sequence_probs
 
 
-def sequence_prob_plot(
-    observed, ys: Optional[dict], **kwargs
-) -> Figure:
+def sequence_prob_plot(observed, ys: Optional[dict], **kwargs) -> Figure:
     pop_obs = _to_population(observed)
     act_order = np.argsort(pop_obs.act_count_matrix.sum(0))[::-1]
     acts = [pop_obs.unique_acts[i] for i in act_order]

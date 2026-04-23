@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-from acteval.describe.plot import BG, _POPULATION_PALETTE, _save, _subplots
+from acteval.describe.plot import _POPULATION_PALETTE, BG, _save, _subplots
 
 
 def heatmap(
@@ -33,7 +33,9 @@ def heatmap(
     matplotlib.figure.Figure
     """
     summary = result.summary()
-    fig, ax = _subplots(figsize=(max(4, len(summary.columns) * 1.2), max(3, len(summary) * 0.9)), bg=bg)
+    fig, ax = _subplots(
+        figsize=(max(4, len(summary.columns) * 1.2), max(3, len(summary) * 0.9)), bg=bg
+    )
     sns.heatmap(
         summary,
         annot=True,
@@ -48,7 +50,9 @@ def heatmap(
         cbar_kws={"label": "distance", "shrink": 0.8},
         annot_kws={"size": 9},
     )
-    ax.set_title("Domain-level distances from observed", fontsize=11, fontweight="bold", pad=10)
+    ax.set_title(
+        "Domain-level distances from observed", fontsize=11, fontweight="bold", pad=10
+    )
     ax.set_xlabel("")
     ax.tick_params(axis="x", rotation=30, labelsize=9, length=0)
     ax.tick_params(axis="y", rotation=0, labelsize=9, length=0)
@@ -87,7 +91,11 @@ def groups(
     palette = palette or _POPULATION_PALETTE
     gd = result.group_distances[result.model_names]
     # sort rows by mean distance descending so the largest distances appear at top
-    gd = gd.assign(_mean=gd.mean(axis=1)).sort_values("_mean", ascending=True).drop(columns="_mean")
+    gd = (
+        gd.assign(_mean=gd.mean(axis=1))
+        .sort_values("_mean", ascending=True)
+        .drop(columns="_mean")
+    )
     fig, ax = _subplots(figsize=(7, max(4, len(gd) * 0.45)), bg=bg)
     y = np.arange(len(gd))
     for i, model in enumerate(result.model_names):

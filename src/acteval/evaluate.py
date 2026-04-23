@@ -7,6 +7,9 @@ import numpy as np
 import pandas as pd
 from pandas import DataFrame, MultiIndex, Series, concat
 
+from acteval._aggregation import DEFAULT_REMOVE_FEATURES, DEFAULT_REMOVE_GROUPS
+from acteval._compat import _coerce_to_pandas, _is_dataframe
+from acteval._jobs import get_jobs
 from acteval._pipeline import (
     _aggregate_features,
     _make_default,
@@ -17,15 +20,12 @@ from acteval._pipeline import (
     _observed_base_creativity,
     _observed_base_structural,
 )
+from acteval._result_frame import ResultFrame
 from acteval._splits import (
     _get_density_jobs,
     _key_activities,
 )
-from acteval._aggregation import DEFAULT_REMOVE_FEATURES, DEFAULT_REMOVE_GROUPS
-from acteval._result_frame import ResultFrame
 from acteval.features import creativity, structural
-from acteval._compat import _coerce_to_pandas, _is_dataframe
-from acteval._jobs import get_jobs
 from acteval.population import Population
 
 
