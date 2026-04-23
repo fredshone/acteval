@@ -137,7 +137,7 @@ def gantt(
     fig, axes = plt.subplots(
         n_pops,
         1,
-        figsize=(12, (0.2 + (n_pops * (0.2 + 0.2 * n_persons)))),
+        figsize=(12, (1.2 + (n_pops * (0.6 + (0.2 * n_persons))))),
         sharex=True,
     )
     fig.patch.set_facecolor(bg)
@@ -328,9 +328,7 @@ def timeuse(
 
     colors = _build_act_colors(acts, act_colors)
 
-    fig, axes = _subplots(
-        1, len(pops), figsize=(5 * len(pops), 4), sharey=True, bg=bg
-    )
+    fig, axes = _subplots(1, len(pops), figsize=(5 * len(pops), 4), sharey=True, bg=bg)
     for ax, (label, pop) in zip(np.atleast_1d(axes), pops.items()):
         _draw_timeuse_ax(ax, pop, acts, colors, step, time_step)
         ax.set_title(label, fontsize=11, fontweight="bold", pad=8)
@@ -491,9 +489,7 @@ def bigrams(
                 mat[act_idx[parts[0]], act_idx[parts[1]]] = counts.sum() / pop.n
         return mat
 
-    fig, axes = _subplots(
-        1, len(pops), figsize=(5.5 * len(pops), 4.5), bg=bg
-    )
+    fig, axes = _subplots(1, len(pops), figsize=(5.5 * len(pops), 4.5), bg=bg)
     for ax, (label, pop) in zip(np.atleast_1d(axes), pops.items()):
         sns.heatmap(
             _matrix(pop),
