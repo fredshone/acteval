@@ -14,65 +14,36 @@ Or with [uv](https://github.com/astral-sh/uv):
 uv add acteval
 ```
 
-## Development
+## Quick start
 
-```bash
-# Install dependencies (including dev tools)
-uv sync
+```python
+import pandas as pd
+from acteval import compare
 
-# Run tests (benchmarks excluded by default)
-uv run pytest tests/
+observed = pd.DataFrame([
+    {"pid": 0, "act": "home", "start": 0,  "end": 8,  "duration": 8},
+    {"pid": 0, "act": "work", "start": 8,  "end": 16, "duration": 8},
+    {"pid": 0, "act": "home", "start": 16, "end": 24, "duration": 8},
+    {"pid": 1, "act": "home", "start": 0,  "end": 10, "duration": 10},
+    {"pid": 1, "act": "work", "start": 10, "end": 24, "duration": 14},
+])
 
-# Run tests with coverage
-uv run pytest --cov=src/acteval tests/
+# Synthetic population with shifted work times
+synthetic = pd.DataFrame([
+    {"pid": 0, "act": "home", "start": 0,  "end": 9,  "duration": 9},
+    {"pid": 0, "act": "work", "start": 9,  "end": 17, "duration": 8},
+    {"pid": 0, "act": "home", "start": 17, "end": 24, "duration": 7},
+    {"pid": 1, "act": "home", "start": 0,  "end": 8,  "duration": 8},
+    {"pid": 1, "act": "work", "start": 8,  "end": 16, "duration": 8},
+    {"pid": 1, "act": "home", "start": 16, "end": 24, "duration": 8},
+])
 
-# Lint with ruff
-ruff check src/ tests/
-
-# Auto-fix lint issues
-ruff check --fix src/ tests/
-
-# Check formatting with black
-black --check src/ tests/
-
-# Auto-format
-black src/ tests/
-```
-
-## Benchmarks
-
-Two benchmark suites are included, both using [pytest-benchmark](https://pytest-benchmark.readthedocs.io/).
-
-### Population evaluation (`compare`)
-
-Tests `compare()` at 1k, 20k, and 100k rows (observed + synthetic populations):
-
-```bash
-uv run pytest tests/test_bench_evaluate.py --benchmark-only -v
-```
-
-### Pairwise distances (`pairwise_distances`)
-
-Tests `pairwise_distances()` at 256, 512, and 1024 schedules:
-
-```bash
-uv run pytest tests/test_bench_pairwise.py --benchmark-only -v
-```
-
-### Both suites together
-
-```bash
-uv run pytest tests/test_bench_evaluate.py tests/test_bench_pairwise.py --benchmark-only -v
-```
-
-### Comparing runs
-
-```bash
-# Save a baseline
-uv run pytest tests/test_bench_evaluate.py tests/test_bench_pairwise.py --benchmark-only --benchmark-save=baseline
-
-# Compare against it after making changes
-uv run pytest tests/test_bench_evaluate.py tests/test_bench_pairwise.py --benchmark-only --benchmark-compare=baseline
+result = compare(observed, {"my_model": synthetic})
+print(result.summary())
+# creativity      0.250000
+# feasibility     0.000000
+# participations  0.305556
+# timing          0.000576
 ```
 
 ## Input format
@@ -85,7 +56,7 @@ Data is passed as a pandas DataFrame with one row per activity episode:
 | `act` | str | Activity label (e.g. `"home"`, `"work"`, `"shop"`) |
 | `start` | numeric | Start time (any consistent unit, e.g. hours) |
 | `end` | numeric | End time |
-| `duration` | numeric | Duration (`end - start`) |
+
 
 ```python
 import pandas as pd
@@ -265,4 +236,65 @@ print(result.summary())
 # participations       0.11     0.18
 # timing               0.16     0.22
 # transitions          0.22     0.35
+```
+
+## Development
+
+```bash
+# Install dependencies (including dev tools)
+uv sync
+
+# Run tests (benchmarks excluded by default)
+uv run pytest tests/
+
+# Run tests with coverage
+uv run pytest --cov=src/acteval tests/
+
+# Lint with ruff
+ruff check src/ tests/
+
+# Auto-fix lint issues
+ruff check --fix src/ tests/
+
+# Check formatting with black
+black --check src/ tests/
+
+# Auto-format
+black src/ tests/
+```
+
+## Benchmarks
+
+Two benchmark suites are included, both using [pytest-benchmark](https://pytest-benchmark.readthedocs.io/).
+
+### Population evaluation (`compare`)
+
+Tests `compare()` at 1k, 20k, and 100k rows (observed + synthetic populations):
+
+```bash
+uv run pytest tests/test_bench_evaluate.py --benchmark-only -v
+```
+
+### Pairwise distances (`pairwise_distances`)
+
+Tests `pairwise_distances()` at 256, 512, and 1024 schedules:
+
+```bash
+uv run pytest tests/test_bench_pairwise.py --benchmark-only -v
+```
+
+### Both suites together
+
+```bash
+uv run pytest tests/test_bench_evaluate.py tests/test_bench_pairwise.py --benchmark-only -v
+```
+
+### Comparing runs
+
+```bash
+# Save a baseline
+uv run pytest tests/test_bench_evaluate.py tests/test_bench_pairwise.py --benchmark-only --benchmark-save=baseline
+
+# Compare against it after making changes
+uv run pytest tests/test_bench_evaluate.py tests/test_bench_pairwise.py --benchmark-only --benchmark-compare=baseline
 ```
