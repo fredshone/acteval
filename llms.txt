@@ -1,0 +1,68 @@
+# acteval
+
+> Python library for evaluating synthetic activity schedules: given daily sequences of who-did-what-and-when, measures how well a synthetic population reproduces observed distributions across frequencies, timing, transitions, participation rates, and novelty. Distances are 0–1 (lower is better).
+
+## Install
+
+pip install acteval
+
+## Input format
+
+pandas DataFrame, one row per activity episode:
+- pid — person identifier (int or str)
+- act — activity label (str, e.g. "home", "work", "shop")
+- start — episode start time (numeric, any consistent unit)
+- end — episode end time (numeric)
+- duration — episode duration (numeric)
+
+## Key API
+
+- compare(observed, synthetic, **kwargs) → EvalResult
+  Compare one or more synthetic DataFrames to observed.
+  synthetic can be a single DataFrame or {"name": df, ...} dict.
+
+- Evaluator(observed) — cache observed features for repeated comparisons.
+  evaluator.compare({"v1": df_v1}) re-uses cached observed features.
+
+- pairwise_distances(schedules, specs=None) → PairwiseResult
+  NxN distance matrix between individual schedules.
+  result.matrix (numpy), result.to_dataframe() (labeled).
+
+## EvalResult structure
+
+Six DataFrames at three aggregation levels:
+- distances / descriptions              — per-feature (index: domain, feature, segment)
+- group_distances / group_descriptions  — per feature group (index: domain, feature)
+- domain_distances / domain_descriptions — per domain (index: domain)
+
+Convenience: result.summary(), result.rank_models(), result.best_model
+
+## Evaluation domains
+
+- participations — who does what and how often; participation rates, joint participation
+- transitions    — activity sequence patterns (2-, 3-, 4-gram bigrams)
+- timing         — start times and durations (EMD via Wasserstein distance)
+- creativity     — novelty and diversity of synthetic schedules vs observed
+- feasibility    — structural validity: home-based, no consecutive duplicate activities
+
+Missing activity penalty: 1.0 (maximum) for timing; None (compute on available data) for participation/transitions.
+
+## Pairwise distance specs
+
+from acteval.pairwise import chamfer_spec, soft_dtw_spec, default_pairwise_specs
+- default_pairwise_specs() — MAE on participation counts, bigram counts, mean durations
+- chamfer_spec(max_len, weight) — Chamfer on EOS-padded (N, L, 2) sequences
+- soft_dtw_spec(max_len, gamma, weight) — Soft-DTW on EOS-padded sequences
+
+## Source layout
+
+src/acteval/
+- evaluate.py       — public API: compare(), Evaluator, evaluate()
+- _pipeline.py      — evaluation engine; builds features → groups → domains output
+- population.py     — Population: core data structure, integer-encodes activities/persons
+- _jobs.py          — JobSpec dataclass, get_jobs(); reads config.toml
+- pairwise.py       — pairwise_distances(), PairwiseResult, spec factories
+- features/         — structural, frequency, times, transitions, participation, creativity
+- distance/         — wasserstein.py (EMD via POT), scalar.py (MAE/MSE/MAPE)
+- describe/         — descriptive stats alongside distance metrics
+- _filters.py       — filter_novel(): removes sequences seen in base population
