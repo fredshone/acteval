@@ -44,6 +44,7 @@ def build_density_jobs(cfg: dict) -> list[JobSpec]:
     ``missing_distance=1.0``; participation and transition jobs use ``None``.
     """
     n = cfg.get("ngrams", {}).get("min_count", 3)
+    nt = cfg.get("ngrams", {}).get("min_count_trigger", 10)
     p = cfg.get("jobs", {}).get("participations", {})
     t = cfg.get("jobs", {}).get("transitions", {})
     ti = cfg.get("jobs", {}).get("timing", {})
@@ -106,7 +107,7 @@ def build_density_jobs(cfg: dict) -> list[JobSpec]:
             "2-gram",
             "transitions",
             "2-gram",
-            partial(ngrams, n=2, min_count=n),
+            partial(ngrams, n=2, min_count=n, min_count_trigger=nt),
             "av. rate",
             average,
             None,
@@ -116,7 +117,7 @@ def build_density_jobs(cfg: dict) -> list[JobSpec]:
             "3-gram",
             "transitions",
             "3-gram",
-            partial(ngrams, n=3, min_count=n),
+            partial(ngrams, n=3, min_count=n, min_count_trigger=nt),
             "av. rate",
             average,
             None,
@@ -126,7 +127,7 @@ def build_density_jobs(cfg: dict) -> list[JobSpec]:
             "4-gram",
             "transitions",
             "4-gram",
-            partial(ngrams, n=4, min_count=n),
+            partial(ngrams, n=4, min_count=n, min_count_trigger=nt),
             "av. rate",
             average,
             None,

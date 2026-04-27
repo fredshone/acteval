@@ -2,7 +2,8 @@
 # population to be included as a feature. Raising this reduces noise from
 # rare activity sequences at the cost of ignoring less common patterns.
 [ngrams]
-min_count = 1
+min_count = 3
+min_count_trigger = 10
 
 # Which evaluation jobs to run. Set any key to false to skip that feature.
 [jobs.participations]

@@ -6,13 +6,15 @@ from acteval.features._pid_features import PidFeatures
 from acteval.population import Population
 
 
-def ngrams(population: Population, n: int, min_count: int = 0) -> PidFeatures:
+def ngrams(
+    population: Population, n: int, min_count: int = 0, min_count_trigger: int = 0
+) -> PidFeatures:
     """Build per-pid n-gram transition features returning PidFeatures.
 
     Uses the same integer-encoding logic as ``_build_ngrams`` but keeps
     per-person counts with pid tracking instead of compressing immediately.
-    ``min_count`` filtering is applied on the full population to keep a
-    consistent feature space across subsets.
+    ``min_count`` filtering is applied on the full population if pop size
+    is greater than ``min_count_trigger``.
     """
     codes = population.act_codes
     pids = population.pids
@@ -46,7 +48,7 @@ def ngrams(population: Population, n: int, min_count: int = 0) -> PidFeatures:
     count_matrix = np.zeros((len(unique_pids), len(unique_ngrams)), dtype=int)
     np.add.at(count_matrix, (pid_indices, ngram_indices), 1)
 
-    if min_count > 0:
+    if population.n > min_count_trigger and min_count > 0:
         col_totals = count_matrix.sum(axis=0)
         keep = col_totals >= min_count
         count_matrix = count_matrix[:, keep]
