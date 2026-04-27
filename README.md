@@ -24,11 +24,11 @@ observed = pd.DataFrame([
     {"pid": 0, "act": "home", "start": 0,  "end": 8,  "duration": 8},
     {"pid": 0, "act": "work", "start": 8,  "end": 16, "duration": 8},
     {"pid": 0, "act": "home", "start": 16, "end": 24, "duration": 8},
-    {"pid": 1, "act": "home", "start": 0,  "end": 10, "duration": 10},
-    {"pid": 1, "act": "work", "start": 10, "end": 24, "duration": 14},
+    {"pid": 1, "act": "home", "start": 0,  "end": 12, "duration": 12},
+    {"pid": 1, "act": "shop", "start": 12, "end": 13, "duration": 1},
+    {"pid": 1, "act": "home", "start": 13, "end": 24, "duration": 11},
 ])
 
-# Synthetic population with shifted work times
 synthetic = pd.DataFrame([
     {"pid": 0, "act": "home", "start": 0,  "end": 9,  "duration": 9},
     {"pid": 0, "act": "work", "start": 9,  "end": 17, "duration": 8},
@@ -36,14 +36,17 @@ synthetic = pd.DataFrame([
     {"pid": 1, "act": "home", "start": 0,  "end": 8,  "duration": 8},
     {"pid": 1, "act": "work", "start": 8,  "end": 16, "duration": 8},
     {"pid": 1, "act": "home", "start": 16, "end": 24, "duration": 8},
+    {"pid": 2, "act": "home", "start": 0,  "end": 8,  "duration": 8},
+    {"pid": 2, "act": "home", "start": 8, "end": 24, "duration": 16},
 ])
 
 result = compare(observed, {"my_model": synthetic})
 print(result.summary())
-# creativity      0.250000
-# feasibility     0.000000
-# participations  0.305556
-# timing          0.000576
+# creativity      0.166667
+# feasibility     0.500000
+# participations  0.162037
+# timing          0.082728
+# transitions     0.380952
 ```
 
 ## Input format
