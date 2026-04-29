@@ -97,7 +97,10 @@ def _run(args: argparse.Namespace) -> None:
             if name not in synthetic:
                 sys.exit(f"--attrs NAME '{name}' does not match any --model NAME")
             df = _load_df(path)
-            _validate_attrs(df, path)
+            if args.split_on:
+                _validate_attrs(df, path, args.split_on)
+            else:
+                _validate_attrs(df, path)
             attributes[name] = df
 
     # --- validate split-on consistency ---
