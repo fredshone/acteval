@@ -142,14 +142,11 @@ def test_validate_schedule_end_duration_only():
     _validate_schedule(df, "dummy.csv")  # end + duration → no error
 
 
-def test_validate_schedule_missing_pid_exits(capsys):
+def test_validate_schedule_missing_pid_exits():
     df = pd.DataFrame([{"act": "home", "start": 0, "end": 8}])
     with pytest.raises(SystemExit) as exc:
         _validate_schedule(df, "bad.csv")
-    assert exc.value.code != 0 or isinstance(exc.value.code, str)
-    # Error message mentions missing column
-    captured = capsys.readouterr()
-    assert "pid" in captured.err or "pid" in str(exc.value.code)
+    assert "pid" in str(exc.value.code)
 
 
 def test_validate_schedule_missing_act_exits():
