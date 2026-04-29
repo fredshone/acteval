@@ -89,7 +89,9 @@ Data is passed as a pandas DataFrame with one row per activity episode:
 | `act` | str | Activity label (e.g. `"home"`, `"work"`, `"shop"`) |
 | `start` | numeric | Start time (any consistent unit, e.g. hours) |
 | `end` | numeric | End time |
-| `duration` | numeric | Duration (`end - start`) |
+| `duration` | numeric | Duration (`end - start`); can be omitted when both `start` and `end` are provided |
+
+Any two of `start`, `end`, and `duration` are sufficient — the third is derived automatically.
 
 
 ```python

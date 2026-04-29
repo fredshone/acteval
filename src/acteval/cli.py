@@ -7,7 +7,8 @@ import pandas as pd
 from acteval._report import print_markdown
 from acteval.evaluate import Evaluator
 
-_SCHEDULE_COLS = {"pid", "act", "start", "end", "duration"}
+_REQUIRED_SCHEDULE_COLS = {"pid", "act"}
+_TIMING_COLS = {"start", "end", "duration"}
 
 
 def _load_df(path: str) -> pd.DataFrame:
@@ -21,9 +22,33 @@ def _load_df(path: str) -> pd.DataFrame:
 
 
 def _validate_schedule(df: pd.DataFrame, path: str) -> None:
-    missing = _SCHEDULE_COLS - set(df.columns)
-    if missing:
-        sys.exit(f"{path}: missing required columns {sorted(missing)}")
+    cols = set(df.columns)
+    missing_required = _REQUIRED_SCHEDULE_COLS - cols
+    if missing_required:
+        sys.exit(f"{path}: missing required columns {sorted(missing_required)}")
+    timing_present = _TIMING_COLS & cols
+    if len(timing_present) < 2:
+        sys.exit(
+            f"{path}: at least two of {sorted(_TIMING_COLS)} are required; "
+            f"found only {sorted(timing_present)}"
+        )
+
+
+def _derive_timing(df: pd.DataFrame) -> pd.DataFrame:
+    """Derive the missing timing column when only two of start/end/duration are present."""
+    has_start = "start" in df.columns
+    has_end = "end" in df.columns
+    has_dur = "duration" in df.columns
+    if has_start and has_end and not has_dur:
+        df = df.copy()
+        df["duration"] = df["end"] - df["start"]
+    elif has_start and has_dur and not has_end:
+        df = df.copy()
+        df["end"] = df["start"] + df["duration"]
+    elif has_end and has_dur and not has_start:
+        df = df.copy()
+        df["start"] = df["end"] - df["duration"]
+    return df
 
 
 def _validate_attrs(df: pd.DataFrame, path: str, split_on: list | None = None) -> None:
@@ -79,6 +104,7 @@ def _run(args: argparse.Namespace) -> None:
     # --- load target ---
     target = _load_df(args.target)
     _validate_schedule(target, args.target)
+    target = _derive_timing(target)
 
     # --- load synthetic models ---
     synthetic: dict[str, pd.DataFrame] = {}
@@ -87,7 +113,7 @@ def _run(args: argparse.Namespace) -> None:
             sys.exit(f"Duplicate --model name '{name}'")
         df = _load_df(path)
         _validate_schedule(df, path)
-        synthetic[name] = df
+        synthetic[name] = _derive_timing(df)
 
     # --- load per-model attributes ---
     attributes: dict[str, pd.DataFrame] | None = None
@@ -96,6 +122,8 @@ def _run(args: argparse.Namespace) -> None:
         for name, path in args.attrs:
             if name not in synthetic:
                 sys.exit(f"--attrs NAME '{name}' does not match any --model NAME")
+            if name in attributes:
+                sys.exit(f"Duplicate --attrs name '{name}'")
             df = _load_df(path)
             if args.split_on:
                 _validate_attrs(df, path, args.split_on)
