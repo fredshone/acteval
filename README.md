@@ -14,6 +14,36 @@ Or with [uv](https://github.com/astral-sh/uv):
 uv add acteval
 ```
 
+## CLI
+
+`acteval` ships with a command-line interface for comparing models without writing Python.
+
+```bash
+# Compare one model to observed data
+acteval observed.csv --model my_model synthetic.csv
+
+# Compare multiple models side-by-side
+acteval observed.csv \
+  --model model_a synthetic_a.csv \
+  --model model_b synthetic_b.csv
+
+# Save full results to CSV files
+acteval observed.csv --model my_model synthetic.csv --output results/
+
+# Show group-level detail instead of domain summary
+acteval observed.csv --model my_model synthetic.csv --level groups
+
+# Split evaluation by attribute (e.g. gender)
+acteval observed.csv \
+  --target-attrs target_attrs.csv --split-on gender \
+  --model my_model synthetic.csv --attrs my_model synth_attrs.csv
+
+# Use a custom config file
+acteval observed.csv --model my_model synthetic.csv --config custom.toml
+```
+
+Input files can be CSV or Parquet (detected by extension). Run `acteval --help` for the full option list.
+
 ## Quick start
 
 ```python
@@ -59,6 +89,7 @@ Data is passed as a pandas DataFrame with one row per activity episode:
 | `act` | str | Activity label (e.g. `"home"`, `"work"`, `"shop"`) |
 | `start` | numeric | Start time (any consistent unit, e.g. hours) |
 | `end` | numeric | End time |
+| `duration` | numeric | Duration (`end - start`) |
 
 
 ```python
@@ -89,18 +120,7 @@ result = compare(observed, synthetic)
 result = compare(observed, {"model_a": synthetic_a, "model_b": synthetic_b})
 ```
 
-`result` is a dict with six DataFrames:
-
-| key | description |
-|-----|-------------|
-| `"distances"` | Per-feature distances |
-| `"group_distances"` | Distances aggregated by feature group |
-| `"domain_distances"` | Distances aggregated by domain (participations, transitions, timing) |
-| `"descriptions"` | Per-feature descriptive statistics |
-| `"group_descriptions"` | Group-level descriptive statistics |
-| `"domain_descriptions"` | Domain-level descriptive statistics |
-
-Pass `report_stats=True` to include additional statistics in the output.
+`result` is an `EvalResult` object. See [Reading the results](#reading-the-results) for how to access distances and descriptions at feature, group, and domain level.
 
 ### `Evaluator`
 
@@ -113,14 +133,6 @@ evaluator = Evaluator(observed)
 
 result_v1 = evaluator.compare({"v1": synthetic_v1})
 result_v2 = evaluator.compare({"v2": synthetic_v2})
-```
-
-For fine-grained control, compare one model at a time then assemble:
-
-```python
-evaluator.compare_population("v1", synthetic_v1)
-evaluator.compare_population("v2", synthetic_v2)
-result = evaluator.report()
 ```
 
 ### `pairwise_distances(schedules, specs=None)`
@@ -190,18 +202,20 @@ print(pop.durations)  # durations as numpy array
 
 ## Reading the results
 
-### The six DataFrames
+### Accessing results
 
-`compare()` returns an `EvalResult` with six DataFrames at three levels of aggregation:
+`compare()` returns an `EvalResult` with distances and descriptions at three levels of aggregation. Each level is accessed via a property that returns a view object with `.distances` and `.descriptions` DataFrames:
 
 | Property | Index | Content |
 |----------|-------|---------|
-| `result.distances` | `(domain, feature, segment)` | Per-feature distances — lower is closer to observed |
-| `result.descriptions` | `(domain, feature, segment)` | Per-feature descriptive statistics (e.g. average start time) |
-| `result.group_distances` | `(domain, feature)` | Distances averaged across segments |
-| `result.group_descriptions` | `(domain, feature)` | Descriptions averaged across segments |
-| `result.domain_distances` | `(domain,)` | Distances averaged across features — one row per domain |
-| `result.domain_descriptions` | `(domain,)` | Descriptions averaged across features |
+| `result.features.combined.distances` | `(domain, feature, segment)` | Per-feature distances — lower is closer to observed |
+| `result.features.combined.descriptions` | `(domain, feature, segment)` | Per-feature descriptive statistics (e.g. average start time) |
+| `result.groups.combined.distances` | `(domain, feature)` | Distances averaged across segments |
+| `result.groups.combined.descriptions` | `(domain, feature)` | Descriptions averaged across segments |
+| `result.domains.combined.distances` | `(domain,)` | Distances averaged across features — one row per domain |
+| `result.domains.combined.descriptions` | `(domain,)` | Descriptions averaged across features |
+
+Save all levels to CSV at once with `result.save("output_dir/")`.
 
 Distances are in the range **0–1** (lower is better). A distance of `0.0` means the synthetic distribution perfectly matches observed; `1.0` is the maximum penalty.
 
