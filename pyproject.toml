@@ -1,6 +1,6 @@
 [project]
 name = "acteval"
-version = "0.1.1"
+version = "0.1.2"
 description = "Standalone library for evaluating activity sequences"
 requires-python = ">=3.10"
 dependencies = [
