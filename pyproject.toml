@@ -2,7 +2,7 @@
 name = "acteval"
 version = "0.1.1"
 description = "Standalone library for evaluating activity sequences"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
     "pandas",
     "numpy",
@@ -26,6 +26,9 @@ dev-dependencies = [
     "polars>=1.8.2",
 ]
 
+[project.scripts]
+acteval = "acteval.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -38,7 +41,7 @@ testpaths = ["tests"]
 addopts = "--ignore=tests/test_bench_evaluate.py --ignore=tests/test_bench_pairwise.py --benchmark-columns=mean,stddev,rounds --benchmark-sort=name"
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
@@ -48,4 +51,4 @@ ignore = ["E501"]
 "tests/test_distance_emd.py" = ["E402"]
 
 [tool.black]
-target-version = ["py39"]
+target-version = ["py310"]
