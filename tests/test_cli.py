@@ -95,9 +95,7 @@ def test_parser_minimal():
 
 def test_parser_multiple_models():
     p = _build_parser()
-    args = p.parse_args(
-        ["obs.csv", "--model", "a", "a.csv", "--model", "b", "b.csv"]
-    )
+    args = p.parse_args(["obs.csv", "--model", "a", "a.csv", "--model", "b", "b.csv"])
     assert args.model == [["a", "a.csv"], ["b", "b.csv"]]
 
 
@@ -122,23 +120,17 @@ def test_validate_schedule_all_columns_ok():
 
 
 def test_validate_schedule_start_end_only():
-    df = pd.DataFrame(
-        [{"pid": 0, "act": "home", "start": 0, "end": 8}]
-    )
+    df = pd.DataFrame([{"pid": 0, "act": "home", "start": 0, "end": 8}])
     _validate_schedule(df, "dummy.csv")  # start + end → no error
 
 
 def test_validate_schedule_start_duration_only():
-    df = pd.DataFrame(
-        [{"pid": 0, "act": "home", "start": 0, "duration": 8}]
-    )
+    df = pd.DataFrame([{"pid": 0, "act": "home", "start": 0, "duration": 8}])
     _validate_schedule(df, "dummy.csv")  # start + duration → no error
 
 
 def test_validate_schedule_end_duration_only():
-    df = pd.DataFrame(
-        [{"pid": 0, "act": "home", "end": 8, "duration": 8}]
-    )
+    df = pd.DataFrame([{"pid": 0, "act": "home", "end": 8, "duration": 8}])
     _validate_schedule(df, "dummy.csv")  # end + duration → no error
 
 

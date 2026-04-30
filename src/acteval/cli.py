@@ -81,7 +81,9 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Per-model attributes file (repeatable; NAME must match a --model NAME)",
     )
-    p.add_argument("--target-attrs", metavar="PATH", help="Attributes for the target population")
+    p.add_argument(
+        "--target-attrs", metavar="PATH", help="Attributes for the target population"
+    )
     p.add_argument(
         "--split-on",
         nargs="+",
@@ -96,7 +98,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Aggregation level to display (default: domains)",
     )
     p.add_argument("--output", metavar="DIR", help="Directory to save CSV results")
-    p.add_argument("--verbose", action="store_true", help="Print all aggregation levels")
+    p.add_argument(
+        "--verbose", action="store_true", help="Print all aggregation levels"
+    )
     return p
 
 
