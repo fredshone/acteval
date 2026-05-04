@@ -18,31 +18,59 @@ uv add acteval
 
 `acteval` ships with a command-line interface for comparing models without writing Python.
 
+```
+acteval TARGET [TARGET_ATTRS] -m NAME SCHEDULE [ATTRS] [-m ...] [options]
+```
+
 ```bash
 # Compare one model to observed data
-acteval observed.csv --model my_model synthetic.csv
+acteval observed.csv -m my_model synthetic.csv
 
 # Compare multiple models side-by-side
-acteval observed.csv \
-  --model model_a synthetic_a.csv \
-  --model model_b synthetic_b.csv
+acteval observed.csv -m model_a synthetic_a.csv -m model_b synthetic_b.csv
 
-# Save full results to CSV files
-acteval observed.csv --model my_model synthetic.csv --output results/
+# Save results to CSV files
+acteval observed.csv -m my_model synthetic.csv -o results/
 
 # Show group-level detail instead of domain summary
-acteval observed.csv --model my_model synthetic.csv --level groups
+acteval observed.csv -m my_model synthetic.csv -l groups
 
 # Split evaluation by attribute (e.g. gender)
-acteval observed.csv \
-  --target-attrs target_attrs.csv --split-on gender \
-  --model my_model synthetic.csv --attrs my_model synth_attrs.csv
+# TARGET_ATTRS is the second positional; per-model attrs are the third argument to -m
+# Attributes must be provided for the target and ALL models, or not at all
+acteval observed.csv target_attrs.csv \
+  -m model_a synthetic_a.csv synth_attrs_a.csv \
+  -m model_b synthetic_b.csv synth_attrs_b.csv \
+  --split-on gender
+
+# Batch mode: auto-discover model subdirectories
+# Each subdir becomes a model (name = dir name); schedule and attrs files are
+# classified by their columns (pid + act → schedule; pid + other cols → attrs)
+acteval observed.csv --batch models/
+
+# Batch mode with attribute splitting
+acteval observed.csv target_attrs.csv --batch models/ --split-on gender
 
 # Use a custom config file
-acteval observed.csv --model my_model synthetic.csv --config custom.toml
+acteval observed.csv -m my_model synthetic.csv -c custom.toml
 ```
 
 Input files can be CSV or Parquet (detected by extension). Run `acteval --help` for the full option list.
+
+**Attribute rules:**
+- Attributes must be provided for **all** inputs (target + every model) or **none**. Partial specification raises an error.
+- `--split-on` and `TARGET_ATTRS` must be specified together.
+- In batch mode, if any model subdirectory contains an attributes file, all subdirectories must contain one.
+
+**Batch directory layout:**
+```
+models/
+  model_a/
+    schedules.csv      ← has pid, act → classified as schedule
+    attributes.csv     ← has pid + other cols, no act → classified as attrs
+  model_b/
+    output.parquet
+```
 
 ## Quick start
 
