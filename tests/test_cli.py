@@ -50,18 +50,41 @@ def attrs_csv(tmp_path):
     return str(p)
 
 
+@pytest.fixture
+def batch_dir(tmp_path):
+    """Batch directory with two model subdirs, each containing only a schedule."""
+    for name in ("model_a", "model_b"):
+        subdir = tmp_path / name
+        subdir.mkdir()
+        pd.DataFrame(_SYNTHETIC_ROWS).to_csv(subdir / "schedule.csv", index=False)
+    return str(tmp_path)
+
+
+@pytest.fixture
+def batch_dir_with_attrs(tmp_path):
+    """Batch directory with two model subdirs, each containing a schedule and attrs."""
+    for name in ("model_a", "model_b"):
+        subdir = tmp_path / name
+        subdir.mkdir()
+        pd.DataFrame(_SYNTHETIC_ROWS).to_csv(subdir / "schedule.csv", index=False)
+        pd.DataFrame({"pid": [0, 1], "gender": ["m", "f"]}).to_csv(
+            subdir / "attrs.csv", index=False
+        )
+    return str(tmp_path)
+
+
 def _make_args(target, model_pairs, **kwargs):
     """Build a minimal argparse.Namespace for _run."""
     defaults = dict(
         target=target,
-        model=list(model_pairs),
-        attrs=None,
+        model=list(model_pairs) if model_pairs is not None else None,
         target_attrs=None,
         split_on=None,
         config=None,
         level="domains",
         output=None,
         verbose=False,
+        batch=None,
     )
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -88,9 +111,17 @@ def test_parser_minimal():
     p = _build_parser()
     args = p.parse_args(["obs.csv", "--model", "m1", "syn.csv"])
     assert args.target == "obs.csv"
+    assert args.target_attrs is None
     assert args.model == [["m1", "syn.csv"]]
     assert args.level == "domains"
     assert args.verbose is False
+
+
+def test_parser_target_attrs_positional():
+    p = _build_parser()
+    args = p.parse_args(["obs.csv", "ta.csv", "-m", "m1", "syn.csv"])
+    assert args.target == "obs.csv"
+    assert args.target_attrs == "ta.csv"
 
 
 def test_parser_multiple_models():
@@ -107,6 +138,39 @@ def test_parser_level_choices():
 
     with pytest.raises(SystemExit):
         p.parse_args(["obs.csv", "--model", "m", "s.csv", "--level", "invalid"])
+
+
+def test_parser_short_model_flag():
+    p = _build_parser()
+    args = p.parse_args(["obs.csv", "-m", "m1", "syn.csv"])
+    assert args.target == "obs.csv"
+    assert args.model == [["m1", "syn.csv"]]
+
+
+def test_parser_model_inline_attrs():
+    p = _build_parser()
+    args = p.parse_args(["obs.csv", "-m", "m1", "syn.csv", "attrs.csv"])
+    assert args.model == [["m1", "syn.csv", "attrs.csv"]]
+
+
+def test_parser_short_flags():
+    p = _build_parser()
+    args = p.parse_args(
+        ["obs.csv", "-m", "m", "s.csv", "-l", "groups", "-o", "out/", "-v"]
+    )
+    assert args.level == "groups"
+    assert args.output == "out/"
+    assert args.verbose is True
+
+
+def test_parser_batch_flag():
+    p = _build_parser()
+    args = p.parse_args(["obs.csv", "--batch", "models/"])
+    assert args.batch == "models/"
+    assert args.model is None
+
+    args2 = p.parse_args(["obs.csv", "-b", "models/"])
+    assert args2.batch == "models/"
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +272,41 @@ def test_run_saves_output(csv_files, tmp_path, capsys):
     assert "Results saved" in out
 
 
+def test_run_inline_attrs(csv_files, attrs_csv, capsys):
+    """3-arg -m form with target_attrs positional and split_on runs successfully."""
+    obs_path, syn_path = csv_files
+    args = _make_args(
+        obs_path, [["m1", syn_path, attrs_csv]],
+        target_attrs=attrs_csv, split_on=["gender"]
+    )
+    _run(args)
+    out = capsys.readouterr().out
+    assert "Domain distances" in out
+
+
+def test_run_batch_basic(csv_files, batch_dir, capsys):
+    obs_path, _ = csv_files
+    args = _make_args(obs_path, None, batch=batch_dir)
+    _run(args)
+    out = capsys.readouterr().out
+    assert "model_a" in out
+    assert "model_b" in out
+    assert "Domain distances" in out
+
+
+def test_run_batch_with_attrs(csv_files, batch_dir_with_attrs, attrs_csv, capsys):
+    """Batch discovery with attrs, target_attrs positional, and split_on runs successfully."""
+    obs_path, _ = csv_files
+    args = _make_args(
+        obs_path, None,
+        batch=batch_dir_with_attrs, target_attrs=attrs_csv, split_on=["gender"]
+    )
+    _run(args)
+    out = capsys.readouterr().out
+    assert "model_a" in out
+    assert "attrs" in out
+
+
 # ---------------------------------------------------------------------------
 # _run — validation/error paths
 # ---------------------------------------------------------------------------
@@ -216,22 +315,6 @@ def test_run_saves_output(csv_files, tmp_path, capsys):
 def test_run_duplicate_model_name_exits(csv_files):
     obs_path, syn_path = csv_files
     args = _make_args(obs_path, [["m1", syn_path], ["m1", syn_path]])
-    with pytest.raises(SystemExit):
-        _run(args)
-
-
-def test_run_attrs_name_not_in_model_exits(csv_files, attrs_csv):
-    obs_path, syn_path = csv_files
-    args = _make_args(obs_path, [["m1", syn_path]])
-    args.attrs = [["unknown", attrs_csv]]
-    with pytest.raises(SystemExit):
-        _run(args)
-
-
-def test_run_duplicate_attrs_name_exits(csv_files, attrs_csv):
-    obs_path, syn_path = csv_files
-    args = _make_args(obs_path, [["m1", syn_path]])
-    args.attrs = [["m1", attrs_csv], ["m1", attrs_csv]]
     with pytest.raises(SystemExit):
         _run(args)
 
@@ -245,19 +328,37 @@ def test_run_split_on_without_target_attrs_exits(csv_files):
 
 
 def test_run_target_attrs_without_split_on_exits(csv_files, attrs_csv):
+    """All attrs present but --split-on absent → exit."""
     obs_path, syn_path = csv_files
-    args = _make_args(obs_path, [["m1", syn_path]])
-    args.target_attrs = attrs_csv
+    args = _make_args(
+        obs_path, [["m1", syn_path, attrs_csv]], target_attrs=attrs_csv
+    )
+    with pytest.raises(SystemExit):
+        _run(args)
+
+
+def test_run_model_attrs_without_target_attrs_exits(csv_files, attrs_csv):
+    """Model has inline attrs but TARGET_ATTRS not given → all-or-nothing violation."""
+    obs_path, syn_path = csv_files
+    args = _make_args(obs_path, [["m1", syn_path, attrs_csv]])
+    with pytest.raises(SystemExit):
+        _run(args)
+
+
+def test_run_target_attrs_without_model_attrs_exits(csv_files, attrs_csv):
+    """TARGET_ATTRS given but model has no attrs → all-or-nothing violation."""
+    obs_path, syn_path = csv_files
+    args = _make_args(obs_path, [["m1", syn_path]], target_attrs=attrs_csv)
     with pytest.raises(SystemExit):
         _run(args)
 
 
 def test_run_split_on_missing_model_attrs_exits(csv_files, attrs_csv):
+    """TARGET_ATTRS + split_on but no per-model attrs → all-or-nothing violation."""
     obs_path, syn_path = csv_files
-    args = _make_args(obs_path, [["m1", syn_path]])
-    args.target_attrs = attrs_csv
-    args.split_on = ["gender"]
-    # No per-model attrs supplied — should exit
+    args = _make_args(
+        obs_path, [["m1", syn_path]], target_attrs=attrs_csv, split_on=["gender"]
+    )
     with pytest.raises(SystemExit):
         _run(args)
 
@@ -276,5 +377,74 @@ def test_run_model_schedule_only_one_timing_col_exits(tmp_path, csv_files):
     bad = tmp_path / "bad.csv"
     pd.DataFrame([{"pid": 0, "act": "home", "start": 0}]).to_csv(bad, index=False)
     args = _make_args(obs_path, [["m1", str(bad)]])
+    with pytest.raises(SystemExit):
+        _run(args)
+
+
+def test_run_no_model_no_batch_exits(csv_files):
+    obs_path, _ = csv_files
+    args = _make_args(obs_path, None, batch=None)
+    with pytest.raises(SystemExit):
+        _run(args)
+
+
+def test_run_batch_and_model_exits(csv_files, batch_dir):
+    obs_path, syn_path = csv_files
+    args = _make_args(obs_path, [["m1", syn_path]], batch=batch_dir)
+    with pytest.raises(SystemExit):
+        _run(args)
+
+
+def test_run_model_spec_too_short_exits(csv_files):
+    obs_path, _ = csv_files
+    args = _make_args(obs_path, [["name_only"]])
+    with pytest.raises(SystemExit):
+        _run(args)
+
+
+def test_run_model_spec_too_long_exits(csv_files):
+    obs_path, syn_path = csv_files
+    args = _make_args(obs_path, [["m1", syn_path, "attrs.csv", "extra_arg"]])
+    with pytest.raises(SystemExit):
+        _run(args)
+
+
+def test_run_batch_no_schedule_exits(csv_files, tmp_path):
+    """Model subdir with only an attrs file and no schedule → exit."""
+    obs_path, _ = csv_files
+    subdir = tmp_path / "model_a"
+    subdir.mkdir()
+    pd.DataFrame({"pid": [0, 1], "gender": ["m", "f"]}).to_csv(
+        subdir / "attrs.csv", index=False
+    )
+    args = _make_args(obs_path, None, batch=str(tmp_path))
+    with pytest.raises(SystemExit):
+        _run(args)
+
+
+def test_run_batch_ambiguous_schedule_exits(csv_files, tmp_path):
+    """Model subdir with two schedule files → exit."""
+    obs_path, _ = csv_files
+    subdir = tmp_path / "model_a"
+    subdir.mkdir()
+    pd.DataFrame(_SYNTHETIC_ROWS).to_csv(subdir / "sched1.csv", index=False)
+    pd.DataFrame(_SYNTHETIC_ROWS).to_csv(subdir / "sched2.csv", index=False)
+    args = _make_args(obs_path, None, batch=str(tmp_path))
+    with pytest.raises(SystemExit):
+        _run(args)
+
+
+def test_run_batch_inconsistent_attrs_exits(csv_files, tmp_path):
+    """Some model subdirs have attrs and some do not → exit."""
+    obs_path, _ = csv_files
+    for i, name in enumerate(["model_a", "model_b"]):
+        subdir = tmp_path / name
+        subdir.mkdir()
+        pd.DataFrame(_SYNTHETIC_ROWS).to_csv(subdir / "schedule.csv", index=False)
+        if i == 0:
+            pd.DataFrame({"pid": [0, 1], "gender": ["m", "f"]}).to_csv(
+                subdir / "attrs.csv", index=False
+            )
+    args = _make_args(obs_path, None, batch=str(tmp_path))
     with pytest.raises(SystemExit):
         _run(args)
