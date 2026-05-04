@@ -276,8 +276,10 @@ def test_run_inline_attrs(csv_files, attrs_csv, capsys):
     """3-arg -m form with target_attrs positional and split_on runs successfully."""
     obs_path, syn_path = csv_files
     args = _make_args(
-        obs_path, [["m1", syn_path, attrs_csv]],
-        target_attrs=attrs_csv, split_on=["gender"]
+        obs_path,
+        [["m1", syn_path, attrs_csv]],
+        target_attrs=attrs_csv,
+        split_on=["gender"],
     )
     _run(args)
     out = capsys.readouterr().out
@@ -298,8 +300,11 @@ def test_run_batch_with_attrs(csv_files, batch_dir_with_attrs, attrs_csv, capsys
     """Batch discovery with attrs, target_attrs positional, and split_on runs successfully."""
     obs_path, _ = csv_files
     args = _make_args(
-        obs_path, None,
-        batch=batch_dir_with_attrs, target_attrs=attrs_csv, split_on=["gender"]
+        obs_path,
+        None,
+        batch=batch_dir_with_attrs,
+        target_attrs=attrs_csv,
+        split_on=["gender"],
     )
     _run(args)
     out = capsys.readouterr().out
@@ -330,9 +335,7 @@ def test_run_split_on_without_target_attrs_exits(csv_files):
 def test_run_target_attrs_without_split_on_exits(csv_files, attrs_csv):
     """All attrs present but --split-on absent → exit."""
     obs_path, syn_path = csv_files
-    args = _make_args(
-        obs_path, [["m1", syn_path, attrs_csv]], target_attrs=attrs_csv
-    )
+    args = _make_args(obs_path, [["m1", syn_path, attrs_csv]], target_attrs=attrs_csv)
     with pytest.raises(SystemExit):
         _run(args)
 

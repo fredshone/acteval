@@ -86,9 +86,7 @@ def _classify_file(path: str) -> str:
             f"{path}: cannot classify — has 'pid' but no 'act' and no attribute "
             f"columns beyond {sorted(_KNOWN_COLS - {'act'})}; found: {sorted(cols)}"
         )
-    sys.exit(
-        f"{path}: cannot classify — missing 'pid' column; found: {sorted(cols)}"
-    )
+    sys.exit(f"{path}: cannot classify — missing 'pid' column; found: {sorted(cols)}")
 
 
 def _discover_batch(batch_dir: str) -> list[tuple[str, str, str | None]]:
@@ -187,7 +185,9 @@ def _build_parser() -> argparse.ArgumentParser:
         default="domains",
         help="Aggregation level to display (default: domains)",
     )
-    p.add_argument("--output", "-o", metavar="DIR", help="Directory to save CSV results")
+    p.add_argument(
+        "--output", "-o", metavar="DIR", help="Directory to save CSV results"
+    )
     p.add_argument(
         "--verbose", "-v", action="store_true", help="Print all aggregation levels"
     )
@@ -291,7 +291,9 @@ def _run(args: argparse.Namespace) -> None:
     )
     # Attrs are only meaningful for splitting; don't pass them when split_on is absent
     attrs_for_evaluator = attributes if args.split_on else None
-    result = evaluator.compare(synthetic, attributes=attrs_for_evaluator, verbose=args.verbose)
+    result = evaluator.compare(
+        synthetic, attributes=attrs_for_evaluator, verbose=args.verbose
+    )
 
     # --- print results ---
     levels_to_print = {"domains"}
