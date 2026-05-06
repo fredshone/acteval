@@ -160,22 +160,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "target_attrs",
         nargs="?",
         default=None,
-        metavar="TARGET_ATTRS",
         help="Optional path to target population attributes (CSV or Parquet)",
     )
     p.add_argument(
         "--model",
         "-m",
         nargs="+",
-        metavar="ARG",
         action="append",
         help="Synthetic model: NAME SCHEDULE_PATH [ATTRS_PATH] (repeatable)",
     )
     p.add_argument(
         "--split-on",
+        "-s",
         nargs="+",
         action="extend",
-        metavar="COL",
         help="Attribute columns to split evaluation on (requires TARGET_ATTRS and per-model attrs)",
     )
     p.add_argument("--config", "-c", metavar="PATH", help="Path to custom config.toml")
@@ -187,7 +185,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Aggregation level to display (default: domains)",
     )
     p.add_argument(
-        "--output", "-o", metavar="DIR", help="Directory to save CSV results"
+        "--output", "-o", metavar="OUTPUT_DIR", help="Directory to save CSV results"
     )
     p.add_argument(
         "--verbose", "-v", action="store_true", help="Print all aggregation levels"
@@ -195,7 +193,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--batch",
         "-b",
-        metavar="DIR",
+        metavar="BATCH_DIR",
         help="Directory of model subdirs; schedule and attrs auto-discovered per subdir",
     )
     return p
