@@ -173,6 +173,29 @@ def test_parser_batch_flag():
     assert args2.batch == "models/"
 
 
+def test_parser_split_on_single():
+    p = _build_parser()
+    args = p.parse_args(["obs.csv", "--model", "m", "s.csv", "--split-on", "gender"])
+    assert args.split_on == ["gender"]
+
+
+def test_parser_split_on_multiple_space_separated():
+    p = _build_parser()
+    args = p.parse_args(
+        ["obs.csv", "--model", "m", "s.csv", "--split-on", "gender", "age"]
+    )
+    assert args.split_on == ["gender", "age"]
+
+
+def test_parser_split_on_multiple_repeated_flag():
+    """--split-on col1 --split-on col2 must accumulate, not overwrite."""
+    p = _build_parser()
+    args = p.parse_args(
+        ["obs.csv", "--model", "m", "s.csv", "--split-on", "gender", "--split-on", "age"]
+    )
+    assert args.split_on == ["gender", "age"]
+
+
 # ---------------------------------------------------------------------------
 # _validate_schedule tests
 # ---------------------------------------------------------------------------

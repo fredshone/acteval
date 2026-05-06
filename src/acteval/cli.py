@@ -174,6 +174,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--split-on",
         nargs="+",
+        action="extend",
         metavar="COL",
         help="Attribute columns to split evaluation on (requires TARGET_ATTRS and per-model attrs)",
     )
