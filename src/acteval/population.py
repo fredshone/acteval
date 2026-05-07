@@ -84,8 +84,18 @@ class Population:
 
         raw_pids = df["pid"].values
 
-        # Sort by pid if needed (defensive)
-        if len(raw_pids) > 1 and not np.all(raw_pids[:-1] <= raw_pids[1:]):
+        # Sort by (pid, start) when start is present so that activities within
+        # each person are in temporal order — required for consecutive-activity
+        # and first/last-activity checks in structural.py.  Fall back to
+        # pid-only sort when start is unavailable.
+        if has_start:
+            raw_starts = df["start"].values
+            order = np.lexsort((raw_starts, raw_pids))
+            if (order == np.arange(len(order))).all():
+                order = None
+            else:
+                raw_pids = raw_pids[order]
+        elif len(raw_pids) > 1 and not np.all(raw_pids[:-1] <= raw_pids[1:]):
             order = np.argsort(raw_pids, kind="stable")
             raw_pids = raw_pids[order]
         else:

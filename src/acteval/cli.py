@@ -2,10 +2,13 @@ import argparse
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from acteval._report import print_markdown
 from acteval.evaluate import Evaluator
+from acteval.features.structural import _get_consecutives, feasibility
+from acteval.population import Population
 
 _REQUIRED_SCHEDULE_COLS = {"pid", "act"}
 _TIMING_COLS = {"start", "end", "duration"}
@@ -45,6 +48,12 @@ def _validate_schedule(df: pd.DataFrame, path: str) -> None:
             f"{path}: at least two of {sorted(_TIMING_COLS)} are required; "
             f"found only {sorted(timing_present)}"
         )
+
+
+def _validate_filter_input(df: pd.DataFrame, path: str) -> None:
+    missing = {"pid", "act"} - set(df.columns)
+    if missing:
+        sys.exit(f"{path}: missing required columns {sorted(missing)}")
 
 
 def _derive_timing(df: pd.DataFrame) -> pd.DataFrame:
@@ -332,7 +341,87 @@ def _run(args: argparse.Namespace) -> None:
         print(f"\nResults saved to {args.output}")
 
 
+def _build_filter_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="acteval filter",
+        description="Filter input schedules for structural issues.",
+    )
+    sub = p.add_subparsers(dest="filter_command")
+    sub.required = True
+
+    nhb = sub.add_parser(
+        "non-home-based",
+        help="Return schedules that do not start and end at home.",
+    )
+    nhb.add_argument("input", help="Path to input schedules (CSV or Parquet)")
+    nhb.add_argument("--output", "-o", metavar="FILE", help="Path to save filtered CSV")
+
+    cons = sub.add_parser(
+        "consecutive",
+        help="Return schedules with consecutive duplicate activities.",
+    )
+    cons.add_argument("input", help="Path to input schedules (CSV or Parquet)")
+    cons.add_argument(
+        "--act",
+        nargs="+",
+        default=["home", "work", "education"],
+        metavar="ACT",
+        help="Activities to check for consecutive duplicates (default: home work education)",
+    )
+    cons.add_argument("--output", "-o", metavar="FILE", help="Path to save filtered CSV")
+
+    return p
+
+
+def _filter_and_output(df: pd.DataFrame, mask: np.ndarray, population: Population, output: str | None) -> None:
+    """Filter df to rows belonging to pids flagged by mask and write output."""
+    flagged_pids = population.unique_pids_original[mask]
+    result = df[df["pid"].isin(flagged_pids)]
+    if output:
+        result.to_csv(output, index=False)
+        print(f"Filtered {len(flagged_pids)} person(s) written to {output}")
+    else:
+        print(result.to_csv(index=False), end="")
+
+
+def _run_filter_non_home_based(args: argparse.Namespace) -> None:
+    df = _load_df(args.input)
+    _validate_filter_input(df, args.input)
+    population = Population(df)
+    if population.is_empty:
+        _filter_and_output(df, np.array([], dtype=bool), population, args.output)
+        return
+    flags = feasibility(population)
+    _filter_and_output(df, flags["not home based"], population, args.output)
+
+
+def _run_filter_consecutive(args: argparse.Namespace) -> None:
+    df = _load_df(args.input)
+    _validate_filter_input(df, args.input)
+    population = Population(df)
+    if population.is_empty:
+        _filter_and_output(df, np.array([], dtype=bool), population, args.output)
+        return
+    unique_pids = np.arange(population.n)
+    mask = np.zeros(population.n, dtype=bool)
+    for act in args.act:
+        mask |= _get_consecutives(population.pids, population.acts, unique_pids, act)
+    _filter_and_output(df, mask, population, args.output)
+
+
+def _run_filter_cmd(argv: list[str]) -> None:
+    parser = _build_filter_parser()
+    args = parser.parse_args(argv)
+    if args.filter_command == "non-home-based":
+        _run_filter_non_home_based(args)
+    else:
+        _run_filter_consecutive(args)
+
+
 def main() -> None:
-    parser = _build_parser()
-    args = parser.parse_args()
-    _run(args)
+    if len(sys.argv) > 1 and sys.argv[1] == "filter":
+        _run_filter_cmd(sys.argv[2:])
+    else:
+        parser = _build_parser()
+        args = parser.parse_args()
+        _run(args)

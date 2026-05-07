@@ -63,6 +63,23 @@ def test_feasibility_eval():
     )
 
 
+def test_feasibility_eval_out_of_order_rows():
+    # Person 0's rows are in the DataFrame as: home@0, home@960, work@480.
+    # The true time-ordered sequence is home→work→home — no consecutive home.
+    # Without the (pid, start) sort fix this was spuriously flagged.
+    schedule = DataFrame(
+        [
+            {"pid": 0, "act": "home", "start": 0, "end": 480, "duration": 480},
+            {"pid": 0, "act": "home", "start": 960, "end": 1440, "duration": 480},
+            {"pid": 0, "act": "work", "start": 480, "end": 960, "duration": 480},
+        ]
+    )
+    _, metrics = feasibility_eval(Population(schedule), "test")
+    assert metrics.reset_index(drop=True).equals(
+        Series([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    )
+
+
 def test_describe_structural():
     index = MultiIndex.from_tuples(
         [
