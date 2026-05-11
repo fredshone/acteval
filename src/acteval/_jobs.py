@@ -30,6 +30,44 @@ class JobSpec:
     missing_distance: float | None
 
 
+@dataclass(frozen=True)
+class CreativityConfig:
+    diversity: bool = True  # enables diversity (desc) + homogeneity (dist)
+    novelty: bool = True    # enables novelty (desc) + conservatism (dist)
+
+    @property
+    def enabled(self) -> bool:
+        return self.diversity or self.novelty
+
+
+@dataclass(frozen=True)
+class StructuralConfig:
+    home_based: bool = True
+    home_based_novel: bool = False
+    consecutive: bool = True
+    consecutive_novel: bool = False
+
+    @property
+    def enabled(self) -> bool:
+        return (
+            self.home_based
+            or self.home_based_novel
+            or self.consecutive
+            or self.consecutive_novel
+        )
+
+    @property
+    def needs_novel_pids(self) -> bool:
+        return self.home_based_novel or self.consecutive_novel
+
+
+@dataclass(frozen=True)
+class EvalConfig:
+    density: list[JobSpec]
+    creativity: CreativityConfig
+    structural: StructuralConfig
+
+
 def load_config(path=None) -> dict:
     if path is None:
         path = _DEFAULT_CONFIG
@@ -241,29 +279,29 @@ def build_density_jobs(cfg: dict) -> list[JobSpec]:
     ]
 
 
-def build_creativity_jobs(cfg: dict) -> bool:
-    """Returns whether to run creativity evaluation."""
-    return cfg.get("jobs", {}).get("creativity", {}).get("enabled", True)
+def build_creativity_config(cfg: dict) -> CreativityConfig:
+    c = cfg.get("jobs", {}).get("creativity", {})
+    return CreativityConfig(
+        diversity=c.get("diversity", True),
+        novelty=c.get("novelty", True),
+    )
 
 
-def build_structural_jobs(cfg: dict) -> tuple[bool, bool]:
-    """Returns (enabled, filter_novel_only) for structural/feasibility evaluation."""
+def build_structural_config(cfg: dict) -> StructuralConfig:
     s = cfg.get("jobs", {}).get("structural", {})
-    return s.get("enabled", True), s.get("filter_novel_only", False)
+    return StructuralConfig(
+        home_based=s.get("home_based", True),
+        home_based_novel=s.get("home_based_novel", False),
+        consecutive=s.get("consecutive", True),
+        consecutive_novel=s.get("consecutive_novel", False),
+    )
 
 
-def get_jobs(config_path=None) -> tuple[list[JobSpec], bool, bool, bool]:
-    """Load config and return active job specification.
-
-    Returns:
-        tuple of (density_jobs, run_creativity, run_structural, structural_filter_novel)
-        where density_jobs is a flat list of JobSpec.
-    """
+def get_jobs(config_path=None) -> EvalConfig:
+    """Load config and return active job specification."""
     cfg = load_config(config_path)
-    run_structural, structural_filter_novel = build_structural_jobs(cfg)
-    return (
-        build_density_jobs(cfg),
-        build_creativity_jobs(cfg),
-        run_structural,
-        structural_filter_novel,
+    return EvalConfig(
+        density=build_density_jobs(cfg),
+        creativity=build_creativity_config(cfg),
+        structural=build_structural_config(cfg),
     )

@@ -36,9 +36,13 @@ full_sequences = false  # full abbreviated tour-string distributions (e.g. h>w>h
 
 # Creativity metrics: how novel and diverse the synthetic schedules are.
 [jobs.creativity]
-enabled = true
+diversity = true   # enables diversity (description) + homogeneity (distance)
+novelty   = true   # enables novelty (description) + conservatism (distance)
 
 # Structural / feasibility metrics: home-based schedules, no consecutive duplicates.
+# *_novel variants evaluate only schedules not present in the observed population.
 [jobs.structural]
-enabled = true
-filter_novel_only = false  # set to true to restrict evaluation to novel schedules only
+home_based        = true
+home_based_novel  = false
+consecutive       = true
+consecutive_novel = false

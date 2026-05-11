@@ -6,19 +6,33 @@ from acteval.features._pid_features import PidFeatures
 from acteval.features._utils import _grouped_sum
 from acteval.population import Population
 
-_FEASIBILITY_INDEX = MultiIndex.from_tuples(
-    [
-        ("feasibility", "invalid", "all"),
-        ("feasibility", "not home based", "all"),
-        ("feasibility", "not home based", "starts"),
-        ("feasibility", "not home based", "ends"),
-        ("feasibility", "consecutive", "all"),
-        ("feasibility", "consecutive", "home"),
-        ("feasibility", "consecutive", "work"),
-        ("feasibility", "consecutive", "education"),
-    ],
-    names=["domain", "feature", "segment"],
-)
+def feasibility_index(
+    home_based: bool = True, consecutive: bool = True, suffix: str = ""
+) -> MultiIndex:
+    """Build structural metrics MultiIndex for the enabled components.
+
+    Args:
+        home_based: Include home-based rows.
+        consecutive: Include consecutive-duplicate rows.
+        suffix: Appended to each feature name (e.g. " (novel)").
+    """
+    rows = []
+    if home_based or consecutive:
+        rows.append(("feasibility", f"invalid{suffix}", "all"))
+    if home_based:
+        rows += [
+            ("feasibility", f"not home based{suffix}", "all"),
+            ("feasibility", f"not home based{suffix}", "starts"),
+            ("feasibility", f"not home based{suffix}", "ends"),
+        ]
+    if consecutive:
+        rows += [
+            ("feasibility", f"consecutive{suffix}", "all"),
+            ("feasibility", f"consecutive{suffix}", "home"),
+            ("feasibility", f"consecutive{suffix}", "work"),
+            ("feasibility", f"consecutive{suffix}", "education"),
+        ]
+    return MultiIndex.from_tuples(rows, names=["domain", "feature", "segment"])
 
 
 def feasibility(population: Population) -> dict[str, ndarray]:
@@ -56,7 +70,12 @@ def feasibility(population: Population) -> dict[str, ndarray]:
 
 
 def feasibility_aggregate(
-    flags: dict[str, ndarray], dense_pid_subset: ndarray, name: str
+    flags: dict[str, ndarray],
+    dense_pid_subset: ndarray,
+    name: str,
+    home_based: bool = True,
+    consecutive: bool = True,
+    suffix: str = "",
 ) -> tuple[Series, Series]:
     """Aggregate pre-computed per-pid flags for a subset of dense pids.
 
@@ -67,90 +86,76 @@ def feasibility_aggregate(
         flags: Output of ``feasibility`` for the full population.
         dense_pid_subset: Dense pid indices (0-based) to include.
         name: Model name used for Series naming.
+        home_based: Include home-based rows.
+        consecutive: Include consecutive-duplicate rows.
+        suffix: Appended to feature names (e.g. " (novel)").
 
     Returns:
-        (weights, metrics) in the same format as ``feasibility_eval``.
+        (weights, metrics) indexed by ``feasibility_index(home_based, consecutive, suffix)``.
     """
+    idx = feasibility_index(home_based, consecutive, suffix)
     n = len(dense_pid_subset)
     if n == 0:
-        print(f"Warning: {name} has no novel schedules for quality evaluation.")
-        weights = Series(
-            [0] * len(_FEASIBILITY_INDEX),
-            index=_FEASIBILITY_INDEX,
-            name=f"{name}__weight",
+        return (
+            Series([0] * len(idx), index=idx, name=f"{name}__weight", dtype=int),
+            Series([0] * len(idx), index=idx, name=name, dtype=float),
         )
-        metrics = Series(
-            [0] * len(_FEASIBILITY_INDEX), index=_FEASIBILITY_INDEX, name=name
-        )
-        return weights, metrics
 
-    metrics = Series(
-        [
-            flags[k][dense_pid_subset].sum() / n
-            for k in (
-                "invalid",
-                "not home based",
-                "not home based starts",
-                "not home based ends",
-                "consecutive",
-                "consecutive home",
-                "consecutive work",
-                "consecutive education",
-            )
-        ],
-        index=_FEASIBILITY_INDEX,
-        name=name,
-        dtype=float,
+    values = []
+    if home_based or consecutive:
+        n_total = len(next(iter(flags.values())))
+        invalid = np.zeros(n_total, dtype=bool)
+        if home_based:
+            invalid = invalid | flags["not home based"]
+        if consecutive:
+            invalid = invalid | flags["consecutive"]
+        values.append(invalid[dense_pid_subset].sum() / n)
+    if home_based:
+        values += [
+            flags["not home based"][dense_pid_subset].sum() / n,
+            flags["not home based starts"][dense_pid_subset].sum() / n,
+            flags["not home based ends"][dense_pid_subset].sum() / n,
+        ]
+    if consecutive:
+        values += [
+            flags["consecutive"][dense_pid_subset].sum() / n,
+            flags["consecutive home"][dense_pid_subset].sum() / n,
+            flags["consecutive work"][dense_pid_subset].sum() / n,
+            flags["consecutive education"][dense_pid_subset].sum() / n,
+        ]
+
+    return (
+        Series([n] * len(idx), index=idx, name=f"{name}__weight", dtype=int),
+        Series(values, index=idx, name=name, dtype=float),
     )
-    weights = Series(
-        [n] * len(_FEASIBILITY_INDEX),
-        index=_FEASIBILITY_INDEX,
-        name=f"{name}__weight",
-        dtype=int,
-    )
-    return weights, metrics
 
 
-def feasibility_eval(population: Population, name: str) -> tuple[Series, Series]:
+def feasibility_eval(
+    population: Population,
+    name: str,
+    home_based: bool = True,
+    consecutive: bool = True,
+    suffix: str = "",
+) -> tuple[Series, Series]:
+    """Compute and aggregate feasibility metrics for a Population.
+
+    Args:
+        population: Population to evaluate.
+        name: Model name used for Series naming.
+        home_based: Include home-based rows.
+        consecutive: Include consecutive-duplicate rows.
+        suffix: Appended to feature names (e.g. " (novel)").
+    """
     if population.is_empty:
-        print(f"Warning: {name} has no novel schedules for quality evaluation.")
-        weights = Series(
-            [0] * len(_FEASIBILITY_INDEX),
-            index=_FEASIBILITY_INDEX,
-            name=f"{name}__weight",
+        idx = feasibility_index(home_based, consecutive, suffix)
+        return (
+            Series([0] * len(idx), index=idx, name=f"{name}__weight", dtype=int),
+            Series([0] * len(idx), index=idx, name=name, dtype=float),
         )
-        metrics = Series(
-            [0] * len(_FEASIBILITY_INDEX), index=_FEASIBILITY_INDEX, name=name
-        )
-        return weights, metrics
-
     flags = feasibility(population)
-    n = population.n
-    metrics = Series(
-        [
-            flags[k].sum() / n
-            for k in (
-                "invalid",
-                "not home based",
-                "not home based starts",
-                "not home based ends",
-                "consecutive",
-                "consecutive home",
-                "consecutive work",
-                "consecutive education",
-            )
-        ],
-        index=_FEASIBILITY_INDEX,
-        name=name,
-        dtype=float,
+    return feasibility_aggregate(
+        flags, np.arange(population.n), name, home_based, consecutive, suffix
     )
-    weights = Series(
-        [n] * len(_FEASIBILITY_INDEX),
-        index=_FEASIBILITY_INDEX,
-        name=f"{name}__weight",
-        dtype=int,
-    )
-    return weights, metrics
 
 
 def _get_consecutives(

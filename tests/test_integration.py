@@ -10,6 +10,7 @@ The `observed` and `synthetic` fixtures come from conftest.py.
 import pytest
 from pandas import DataFrame
 
+from acteval._jobs import CreativityConfig, EvalConfig, StructuralConfig, get_jobs
 from acteval.evaluate import Evaluator, SplitNotAvailableError, compare
 
 # ---------------------------------------------------------------------------
@@ -230,3 +231,70 @@ class TestWithSplitsSchema:
         vals = result.domains.by_attribute.distances["m"]
         assert (vals >= 0).all()
         assert (vals <= 1).all()
+
+
+# ---------------------------------------------------------------------------
+# Config component tests
+# ---------------------------------------------------------------------------
+
+
+def _minimal_jobs(creativity=None, structural=None) -> EvalConfig:
+    """Build an EvalConfig with default density and supplied creativity/structural."""
+    base = get_jobs()
+    return EvalConfig(
+        density=base.density,
+        creativity=creativity if creativity is not None else base.creativity,
+        structural=structural if structural is not None else base.structural,
+    )
+
+
+class TestConfigComponents:
+    def test_creativity_diversity_only_rows(self, observed, synthetic):
+        """Disabling novelty removes novelty/conservatism rows."""
+        jobs = _minimal_jobs(creativity=CreativityConfig(diversity=True, novelty=False))
+        result = Evaluator(observed, jobs=jobs).compare({"m": synthetic})
+        features = set(result.features.combined.distances.index.get_level_values("feature"))
+        assert "homogeneity" in features
+        assert "novelty" not in features
+        assert "conservatism" not in features
+
+    def test_creativity_novelty_only_rows(self, observed, synthetic):
+        """Disabling diversity removes diversity/homogeneity rows."""
+        jobs = _minimal_jobs(creativity=CreativityConfig(diversity=False, novelty=True))
+        result = Evaluator(observed, jobs=jobs).compare({"m": synthetic})
+        features = set(result.features.combined.distances.index.get_level_values("feature"))
+        assert "conservatism" in features
+        assert "diversity" not in features
+        assert "homogeneity" not in features
+
+    def test_structural_home_based_only_rows(self, observed, synthetic):
+        """Disabling consecutive removes consecutive rows; keeps not-home-based rows."""
+        jobs = _minimal_jobs(
+            structural=StructuralConfig(home_based=True, consecutive=False)
+        )
+        result = Evaluator(observed, jobs=jobs).compare({"m": synthetic})
+        features = set(result.features.combined.distances.index.get_level_values("feature"))
+        assert any("not home based" in f for f in features)
+        assert not any("consecutive" in f for f in features)
+
+    def test_structural_novel_job_adds_novel_rows(self, observed, synthetic):
+        """Enabling home_based_novel adds '(novel)' rows to output."""
+        jobs = _minimal_jobs(
+            structural=StructuralConfig(home_based=False, consecutive=False, home_based_novel=True)
+        )
+        result = Evaluator(observed, jobs=jobs).compare({"m": synthetic})
+        features = set(result.features.combined.distances.index.get_level_values("feature"))
+        assert any("(novel)" in f for f in features)
+
+    def test_novel_structural_without_creativity_does_not_error(self, observed, synthetic):
+        """Novel structural jobs work even when creativity is disabled (obs_hashes still computed)."""
+        jobs = _minimal_jobs(
+            creativity=CreativityConfig(diversity=False, novelty=False),
+            structural=StructuralConfig(
+                home_based=False, consecutive=False,
+                home_based_novel=True, consecutive_novel=True,
+            ),
+        )
+        result = Evaluator(observed, jobs=jobs).compare({"m": synthetic})
+        features = set(result.features.combined.distances.index.get_level_values("feature"))
+        assert any("(novel)" in f for f in features)

@@ -9,7 +9,7 @@ from pandas import DataFrame, MultiIndex, Series, concat
 
 from acteval._aggregation import DEFAULT_REMOVE_FEATURES, DEFAULT_REMOVE_GROUPS
 from acteval._compat import _coerce_to_pandas, _is_dataframe
-from acteval._jobs import get_jobs
+from acteval._jobs import EvalConfig, get_jobs
 from acteval._pipeline import (
     _aggregate_features,
     _make_default,
@@ -21,10 +21,7 @@ from acteval._pipeline import (
     _observed_base_structural,
 )
 from acteval._result_frame import ResultFrame
-from acteval._splits import (
-    _get_density_jobs,
-    _key_activities,
-)
+from acteval._splits import _key_activities
 from acteval.features import creativity, structural
 from acteval.population import Population
 
@@ -318,6 +315,7 @@ class Evaluator:
         target_attributes: DataFrame | None = None,
         split_on: list[str] | None = None,
         config_path=None,
+        jobs: EvalConfig | None = None,
     ):
         target = _coerce_to_pandas(target)
         if target_attributes is not None:
@@ -373,6 +371,7 @@ class Evaluator:
         self._target_attributes = target_attributes
         self._split_on = split_on
         self._target_pid_features = {}
+        self._jobs: EvalConfig = jobs if jobs is not None else get_jobs(config_path)
         self._precompute_target()
 
     def __repr__(self) -> str:
@@ -407,16 +406,9 @@ class Evaluator:
         # Phase 1: run every feature function over the full target population,
         # storing per-pid results keyed by (domain, name).  These are cheap to
         # subset later, so we compute them once here rather than once per split.
-        for spec in _get_density_jobs(self._config_path):
+        for spec in self._jobs.density:
             key = (spec.domain, spec.name)
             self._target_pid_features[key] = spec.feature_fn(self._target_pop)
-
-        (
-            self._density_jobs,
-            self._run_creativity,
-            self._run_structural,
-            self._structural_filter_novel,
-        ) = get_jobs(self._config_path)
 
         # Phase 2: for each (split, category) combination, slice the target
         # population to only the relevant pids and aggregate their features.
@@ -443,17 +435,23 @@ class Evaluator:
 
         # Phase 3: build the "observed" base rows that will sit alongside the
         # per-model columns in the final concatenated DataFrames.  Also cache
-        # sequence hashes for creativity scoring.
+        # sequence hashes for creativity and novel-structural scoring.
         base_desc_parts: list[DataFrame] = []
         base_dist_parts: list[DataFrame] = []
         self._obs_hashes: dict[tuple, object] = {}
+        _needs_hashes = (
+            self._jobs.creativity.enabled or self._jobs.structural.needs_novel_pids
+        )
 
         for split, cat, sub_target, cached_subset in self._split_cat_info:
-            if self._run_creativity:
-                bd, bi, obs_hash = _observed_base_creativity(sub_target)
-                # obs_hash is a frozenset of sequence hashes; used in
-                # compare_population to flag novel (unseen) sequences.
+            if _needs_hashes:
+                obs_hash = creativity.hash_population(sub_target)
                 self._obs_hashes[(split, cat)] = obs_hash
+
+            if self._jobs.creativity.enabled:
+                bd, bi = _observed_base_creativity(
+                    sub_target, self._obs_hashes[(split, cat)], self._jobs.creativity
+                )
                 for df in (bd, bi):
                     df.index = MultiIndex.from_tuples(
                         [(*i, split, cat) for i in df.index],
@@ -462,8 +460,8 @@ class Evaluator:
                 base_desc_parts.append(bd)
                 base_dist_parts.append(bi.drop("observed", axis=1))
 
-            if self._run_structural:
-                base_struct = _observed_base_structural(sub_target)
+            if self._jobs.structural.enabled:
+                base_struct = _observed_base_structural(sub_target, self._jobs.structural)
                 base_struct.index = MultiIndex.from_tuples(
                     [(*i, split, cat) for i in base_struct.index],
                     names=list(base_struct.index.names) + ["label", "cat"],
@@ -471,7 +469,7 @@ class Evaluator:
                 base_desc_parts.append(base_struct)
                 base_dist_parts.append(base_struct.drop("observed", axis=1))
 
-            for spec in self._density_jobs:
+            for spec in self._jobs.density:
                 key = (spec.domain, spec.name)
                 obs_feat = cached_subset[key]
                 base, _ = _observed_base(spec, obs_feat)
@@ -607,7 +605,7 @@ class Evaluator:
         pop = Population(schedule)
         pid_features = {
             (spec.domain, spec.name): spec.feature_fn(pop)
-            for spec in _get_density_jobs(self._config_path)
+            for spec in self._jobs.density
         }
         description_parts: list[DataFrame] = []
         distance_parts: list[DataFrame] = []
@@ -616,12 +614,12 @@ class Evaluator:
         # _precompute_target Phase 1).  Creativity hashes and structural
         # feasibility flags are computed here for the entire synthetic
         # population; the split loop below only subsets them.
-        # Per-pid hashes are needed by both creativity metrics and by structural
-        # (to replicate the filter_novel step per split without re-scanning the
-        # schedule each time).
-        if self._run_creativity or self._run_structural:
+        _needs_hashes = (
+            self._jobs.creativity.enabled or self._jobs.structural.needs_novel_pids
+        )
+        if _needs_hashes:
             pid_hashes = creativity.hash_per_pid(schedule)
-        if self._run_structural:
+        if self._jobs.structural.enabled:
             feasibility_flags = structural.feasibility(pop)
 
         # Phase 2: iterate over (split, category) combinations and subset the
@@ -637,11 +635,13 @@ class Evaluator:
                 schedule.loc[schedule.pid.isin(sample_pids), "act"].unique()
             )
 
-            if self._run_creativity:
-                # Subset pre-computed hashes to this split's pids; no
-                # re-hashing of the schedule is needed.
+            if self._jobs.creativity.enabled:
                 c_desc, c_dist = _model_cols_creativity(
-                    model, pid_hashes, sample_pids, self._obs_hashes[(split, cat)]
+                    model,
+                    pid_hashes,
+                    sample_pids,
+                    self._obs_hashes[(split, cat)],
+                    self._jobs.creativity,
                 )
                 for df in (c_desc, c_dist):
                     df.index = MultiIndex.from_tuples(
@@ -651,19 +651,20 @@ class Evaluator:
                 description_parts.append(c_desc)
                 distance_parts.append(c_dist)
 
-            if self._run_structural:
-                if self._structural_filter_novel:
-                    # Restrict structural evaluation to novel schedules: synthetic
-                    # persons whose sequence is not present in the observed subset.
+            if self._jobs.structural.enabled:
+                novel_dense_pids = None
+                if self._jobs.structural.needs_novel_pids:
                     obs_hash = self._obs_hashes[(split, cat)]
-                    structural_pids = np.array(
+                    novel_pids = np.array(
                         [p for p in sample_pids if pid_hashes.get(p) not in obs_hash]
                     )
-                    structural_dense_pids = pop.dense_pids_from_original(structural_pids)
-                else:
-                    structural_dense_pids = synth_dense_pids
+                    novel_dense_pids = pop.dense_pids_from_original(novel_pids)
                 s_cols = _model_cols_structural(
-                    model, feasibility_flags, structural_dense_pids
+                    model,
+                    feasibility_flags,
+                    synth_dense_pids,
+                    novel_dense_pids,
+                    self._jobs.structural,
                 )
                 for parts in (description_parts, distance_parts):
                     tagged = s_cols.copy()
@@ -673,7 +674,7 @@ class Evaluator:
                     )
                     parts.append(tagged)
 
-            for spec in self._density_jobs:
+            for spec in self._jobs.density:
                 key = (spec.domain, spec.name)
                 obs_feat = cached_subset[key]
                 # default holds the observed distribution shape; used as a

@@ -44,7 +44,7 @@ from typing import Callable
 import numpy as np
 from pandas import DataFrame, MultiIndex, Series, concat
 
-from acteval._jobs import JobSpec
+from acteval._jobs import CreativityConfig, JobSpec, StructuralConfig
 from acteval._result_frame import ResultFrame
 from acteval.features import creativity, structural
 from acteval.population import Population
@@ -165,39 +165,42 @@ def _model_contribution(
 
 def _observed_base_creativity(
     target_schedules: DataFrame,
-) -> tuple[DataFrame, DataFrame, object]:
-    """Build observed base rows for creativity metrics.
+    observed_hash: set,
+    config: CreativityConfig,
+) -> tuple[DataFrame, DataFrame]:
+    """Build observed base rows for enabled creativity metrics.
 
-    Returns (base_desc, base_dist, observed_hash).
+    Args:
+        target_schedules: Observed schedule DataFrame.
+        observed_hash: Pre-computed population hash set for this split/cat.
+        config: Controls which creativity rows to produce.
     """
-    observed_hash = creativity.hash_population(target_schedules)
-    observed_diversity = creativity.diversity(target_schedules, observed_hash)
-    feature_count = target_schedules.pid.nunique()
-    mi_desc = MultiIndex.from_tuples(
-        [("creativity", "diversity", "all"), ("creativity", "novelty", "all")],
-        names=["domain", "feature", "segment"],
-    )
-    mi_dist = MultiIndex.from_tuples(
-        [("creativity", "homogeneity", "all"), ("creativity", "conservatism", "all")],
-        names=["domain", "feature", "segment"],
-    )
+    obs_diversity = creativity.diversity(target_schedules, observed_hash)
+    n = target_schedules.pid.nunique()
+    names = ["domain", "feature", "segment"]
+    desc_idx, desc_weight, desc_val, desc_unit = [], [], [], []
+    dist_idx, dist_weight, dist_val, dist_unit = [], [], [], []
+
+    if config.diversity:
+        desc_idx.append(("creativity", "diversity", "all"))
+        desc_weight.append(n); desc_val.append(obs_diversity); desc_unit.append("prob. unique")
+        dist_idx.append(("creativity", "homogeneity", "all"))
+        dist_weight.append(n); dist_val.append(1 - obs_diversity); dist_unit.append("prob. not unique")
+    if config.novelty:
+        desc_idx.append(("creativity", "novelty", "all"))
+        desc_weight.append(n); desc_val.append(1); desc_unit.append("prob. novel")
+        dist_idx.append(("creativity", "conservatism", "all"))
+        dist_weight.append(n); dist_val.append(0); dist_unit.append("prob. conservative")
+
     base_desc = DataFrame(
-        {
-            "observed__weight": [feature_count, feature_count],
-            "observed": [observed_diversity, 1],
-            "unit": ["prob. unique", "prob. novel"],
-        },
-        index=mi_desc,
+        {"observed__weight": desc_weight, "observed": desc_val, "unit": desc_unit},
+        index=MultiIndex.from_tuples(desc_idx, names=names),
     )
     base_dist = DataFrame(
-        {
-            "observed__weight": [feature_count, feature_count],
-            "observed": [1 - observed_diversity, 0],
-            "unit": ["prob. not unique", "prob. conservative"],
-        },
-        index=mi_dist,
+        {"observed__weight": dist_weight, "observed": dist_val, "unit": dist_unit},
+        index=MultiIndex.from_tuples(dist_idx, names=names),
     )
-    return base_desc, base_dist, observed_hash
+    return base_desc, base_dist
 
 
 def _model_cols_creativity(
@@ -205,40 +208,43 @@ def _model_cols_creativity(
     pid_hashes: dict,
     sample_pids,
     observed_hash: set,
+    config: CreativityConfig,
 ) -> tuple[DataFrame, DataFrame]:
     """Compute creativity columns for one model using pre-computed per-pid hashes.
 
     Args:
         model: Model name.
-        pid_hashes: ``{pid: hash_str}`` for the full synthetic population,
-            pre-computed once before the split loop.
+        pid_hashes: ``{pid: hash_str}`` for the full synthetic population.
         sample_pids: Pid values for this (split, cat) subset.
         observed_hash: Pre-cached hash set for this (split, cat) target subset.
+        config: Controls which creativity rows to produce.
     """
     y_hash = {pid_hashes[p] for p in sample_pids if p in pid_hashes}
     y_count = len(sample_pids)
     y_diversity = len(y_hash) / y_count if y_count > 0 else 0
-    mi_desc = MultiIndex.from_tuples(
-        [("creativity", "diversity", "all"), ("creativity", "novelty", "all")],
-        names=["domain", "feature", "segment"],
-    )
-    mi_dist = MultiIndex.from_tuples(
-        [("creativity", "homogeneity", "all"), ("creativity", "conservatism", "all")],
-        names=["domain", "feature", "segment"],
-    )
+    names = ["domain", "feature", "segment"]
+    desc_idx, desc_weight, desc_val = [], [], []
+    dist_idx, dist_weight, dist_val = [], [], []
+
+    if config.diversity:
+        desc_idx.append(("creativity", "diversity", "all"))
+        desc_weight.append(y_count); desc_val.append(y_diversity)
+        dist_idx.append(("creativity", "homogeneity", "all"))
+        dist_weight.append(y_count); dist_val.append(1 - y_diversity)
+    if config.novelty:
+        y_novelty = creativity.novelty(observed_hash, y_hash)
+        desc_idx.append(("creativity", "novelty", "all"))
+        desc_weight.append(y_count); desc_val.append(y_novelty)
+        dist_idx.append(("creativity", "conservatism", "all"))
+        dist_weight.append(y_count); dist_val.append(1 - y_novelty)
+
     desc = DataFrame(
-        {
-            f"{model}__weight": [y_count, y_count],
-            model: [y_diversity, creativity.novelty(observed_hash, y_hash)],
-        },
-        index=mi_desc,
+        {f"{model}__weight": desc_weight, model: desc_val},
+        index=MultiIndex.from_tuples(desc_idx, names=names),
     )
     dist = DataFrame(
-        {
-            f"{model}__weight": [y_count, y_count],
-            model: [1 - y_diversity, creativity.conservatism(observed_hash, y_hash)],
-        },
-        index=mi_dist,
+        {f"{model}__weight": dist_weight, model: dist_val},
+        index=MultiIndex.from_tuples(dist_idx, names=names),
     )
     return desc, dist
 
@@ -248,20 +254,50 @@ def _model_cols_creativity(
 # ---------------------------------------------------------------------------
 
 
-def _observed_base_structural(target_schedules: DataFrame) -> DataFrame:
-    """Build observed base rows for structural (feasibility) metrics."""
-    observed_weights, observed_metrics = structural.feasibility_eval(
-        Population(target_schedules), name="observed"
-    )
-    base = concat([observed_weights, observed_metrics], axis=1)
-    base["unit"] = "prob. infeasible"
-    return base
+def _observed_base_structural(
+    target_schedules: DataFrame, config: StructuralConfig
+) -> DataFrame:
+    """Build observed base rows for enabled structural (feasibility) metrics.
+
+    Novel-scoped rows use ``observed = 0`` (by definition the observed population
+    has no novel schedules).
+    """
+    parts = []
+    if config.home_based or config.consecutive:
+        w, m = structural.feasibility_eval(
+            Population(target_schedules),
+            name="observed",
+            home_based=config.home_based,
+            consecutive=config.consecutive,
+        )
+        base = concat([w, m], axis=1)
+        base["unit"] = "prob. infeasible"
+        parts.append(base)
+    if config.home_based_novel or config.consecutive_novel:
+        idx = structural.feasibility_index(
+            home_based=config.home_based_novel,
+            consecutive=config.consecutive_novel,
+            suffix=" (novel)",
+        )
+        n = target_schedules.pid.nunique()
+        novel_base = DataFrame(
+            {
+                "observed__weight": [n] * len(idx),
+                "observed": [0.0] * len(idx),
+                "unit": "prob. infeasible",
+            },
+            index=idx,
+        )
+        parts.append(novel_base)
+    return concat(parts)
 
 
 def _model_cols_structural(
     model: str,
     per_pid_flags: dict,
+    synth_dense_pids,
     novel_dense_pids,
+    config: StructuralConfig,
 ) -> DataFrame:
     """Compute structural columns for one model using pre-computed per-pid flags.
 
@@ -269,14 +305,32 @@ def _model_cols_structural(
         model: Model name.
         per_pid_flags: Output of ``structural.feasibility`` for the full
             synthetic population, pre-computed once before the split loop.
-        novel_dense_pids: Dense pid indices (0-based) of the novel persons in
-            this (split, cat) subset — i.e. synthetic persons whose sequence is
-            not already present in the corresponding target subset.
+        synth_dense_pids: Dense pid indices for all persons in this split/cat.
+        novel_dense_pids: Dense pid indices for novel persons only (may be None
+            if ``config.needs_novel_pids`` is False).
+        config: Controls which structural rows to produce.
     """
-    weights, metrics = structural.feasibility_aggregate(
-        per_pid_flags, novel_dense_pids, model
-    )
-    return concat([weights, metrics], axis=1)
+    parts = []
+    if config.home_based or config.consecutive:
+        w, m = structural.feasibility_aggregate(
+            per_pid_flags,
+            synth_dense_pids,
+            model,
+            home_based=config.home_based,
+            consecutive=config.consecutive,
+        )
+        parts.append(concat([w, m], axis=1))
+    if config.home_based_novel or config.consecutive_novel:
+        w, m = structural.feasibility_aggregate(
+            per_pid_flags,
+            novel_dense_pids,
+            model,
+            home_based=config.home_based_novel,
+            consecutive=config.consecutive_novel,
+            suffix=" (novel)",
+        )
+        parts.append(concat([w, m], axis=1))
+    return concat(parts) if parts else DataFrame()
 
 
 def _describe_feature(
