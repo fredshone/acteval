@@ -246,21 +246,24 @@ def build_creativity_jobs(cfg: dict) -> bool:
     return cfg.get("jobs", {}).get("creativity", {}).get("enabled", True)
 
 
-def build_structural_jobs(cfg: dict) -> bool:
-    """Returns whether to run structural/feasibility evaluation."""
-    return cfg.get("jobs", {}).get("structural", {}).get("enabled", True)
+def build_structural_jobs(cfg: dict) -> tuple[bool, bool]:
+    """Returns (enabled, filter_novel_only) for structural/feasibility evaluation."""
+    s = cfg.get("jobs", {}).get("structural", {})
+    return s.get("enabled", True), s.get("filter_novel_only", False)
 
 
-def get_jobs(config_path=None) -> tuple[list[JobSpec], bool, bool]:
+def get_jobs(config_path=None) -> tuple[list[JobSpec], bool, bool, bool]:
     """Load config and return active job specification.
 
     Returns:
-        tuple of (density_jobs, run_creativity, run_structural)
+        tuple of (density_jobs, run_creativity, run_structural, structural_filter_novel)
         where density_jobs is a flat list of JobSpec.
     """
     cfg = load_config(config_path)
+    run_structural, structural_filter_novel = build_structural_jobs(cfg)
     return (
         build_density_jobs(cfg),
         build_creativity_jobs(cfg),
-        build_structural_jobs(cfg),
+        run_structural,
+        structural_filter_novel,
     )

@@ -10,7 +10,7 @@ _TRAILING_DIGITS = re.compile(r"\d+$")
 
 def _get_density_jobs(config_path=None) -> list[JobSpec]:
     """Return flat list of JobSpec for all active density jobs."""
-    jobs, _, _ = get_jobs(config_path)
+    jobs, _, _, _ = get_jobs(config_path)
     return jobs
 
 

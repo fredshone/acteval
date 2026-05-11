@@ -41,3 +41,4 @@ enabled = true
 # Structural / feasibility metrics: home-based schedules, no consecutive duplicates.
 [jobs.structural]
 enabled = true
+filter_novel_only = false  # set to true to restrict evaluation to novel schedules only

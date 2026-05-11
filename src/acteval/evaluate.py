@@ -411,9 +411,12 @@ class Evaluator:
             key = (spec.domain, spec.name)
             self._target_pid_features[key] = spec.feature_fn(self._target_pop)
 
-        self._density_jobs, self._run_creativity, self._run_structural = get_jobs(
-            self._config_path
-        )
+        (
+            self._density_jobs,
+            self._run_creativity,
+            self._run_structural,
+            self._structural_filter_novel,
+        ) = get_jobs(self._config_path)
 
         # Phase 2: for each (split, category) combination, slice the target
         # population to only the relevant pids and aggregate their features.
@@ -649,15 +652,18 @@ class Evaluator:
                 distance_parts.append(c_dist)
 
             if self._run_structural:
-                # Find novel dense pids: synthetic persons in this split whose
-                # sequence is not present in the corresponding target subset.
-                obs_hash = self._obs_hashes[(split, cat)]
-                novel_sample_pids = np.array(
-                    [p for p in sample_pids if pid_hashes.get(p) not in obs_hash]
-                )
-                novel_dense_pids = pop.dense_pids_from_original(novel_sample_pids)
+                if self._structural_filter_novel:
+                    # Restrict structural evaluation to novel schedules: synthetic
+                    # persons whose sequence is not present in the observed subset.
+                    obs_hash = self._obs_hashes[(split, cat)]
+                    structural_pids = np.array(
+                        [p for p in sample_pids if pid_hashes.get(p) not in obs_hash]
+                    )
+                    structural_dense_pids = pop.dense_pids_from_original(structural_pids)
+                else:
+                    structural_dense_pids = synth_dense_pids
                 s_cols = _model_cols_structural(
-                    model, feasibility_flags, novel_dense_pids
+                    model, feasibility_flags, structural_dense_pids
                 )
                 for parts in (description_parts, distance_parts):
                     tagged = s_cols.copy()
