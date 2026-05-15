@@ -85,6 +85,7 @@ def _make_args(target, model_pairs, **kwargs):
         output=None,
         verbose=False,
         batch=None,
+        no_progress=True,
     )
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -355,12 +356,12 @@ def test_run_split_on_without_target_attrs_exits(csv_files):
         _run(args)
 
 
-def test_run_target_attrs_without_split_on_exits(csv_files, attrs_csv):
-    """All attrs present but --split-on absent → exit."""
+def test_run_target_attrs_without_split_on_succeeds(csv_files, attrs_csv, capsys):
+    """target_attrs without --split-on is allowed; attrs are loaded but not used for splitting."""
     obs_path, syn_path = csv_files
     args = _make_args(obs_path, [["m1", syn_path, attrs_csv]], target_attrs=attrs_csv)
-    with pytest.raises(SystemExit):
-        _run(args)
+    _run(args)
+    assert "m1" in capsys.readouterr().out
 
 
 def test_run_model_attrs_without_target_attrs_exits(csv_files, attrs_csv):
@@ -460,8 +461,69 @@ def test_run_batch_ambiguous_schedule_exits(csv_files, tmp_path):
         _run(args)
 
 
-def test_run_batch_inconsistent_attrs_exits(csv_files, tmp_path):
-    """Some model subdirs have attrs and some do not → exit."""
+def test_run_batch_with_version_dirs(csv_files, tmp_path, capsys):
+    """Model subdirs with version_N folders; latest version's schedule is used."""
+    obs_path, _ = csv_files
+    for name in ("model_a", "model_b"):
+        subdir = tmp_path / name
+        for ver in ("version_0", "version_1"):
+            verdir = subdir / ver
+            verdir.mkdir(parents=True)
+        pd.DataFrame(_SYNTHETIC_ROWS).to_csv(subdir / "version_1" / "schedule.csv", index=False)
+    args = _make_args(obs_path, None, batch=str(tmp_path))
+    _run(args)
+    out = capsys.readouterr().out
+    assert "model_a" in out
+    assert "model_b" in out
+    assert "version_1" in out
+    assert "Domain distances" in out
+
+
+def test_run_batch_with_version_dirs_picks_highest(csv_files, tmp_path, capsys):
+    """When multiple version_N dirs all have schedules, the highest N is used."""
+    obs_path, _ = csv_files
+    for name in ("model_a", "model_b"):
+        subdir = tmp_path / name
+        for ver in ("version_0", "version_1", "version_2"):
+            verdir = subdir / ver
+            verdir.mkdir(parents=True)
+            pd.DataFrame(_SYNTHETIC_ROWS).to_csv(verdir / "schedule.csv", index=False)
+    args = _make_args(obs_path, None, batch=str(tmp_path))
+    _run(args)
+    out = capsys.readouterr().out
+    assert out.count("version_2") >= 2  # one mention per model
+    assert "version_1" not in out
+    assert "version_0" not in out
+
+
+def test_run_batch_version_dirs_with_attrs(csv_files, tmp_path, attrs_csv, capsys):
+    """Version dirs containing both schedule and attrs are discovered correctly."""
+    obs_path, _ = csv_files
+    for name in ("model_a", "model_b"):
+        subdir = tmp_path / name
+        for ver in ("version_0", "version_1"):
+            verdir = subdir / ver
+            verdir.mkdir(parents=True)
+        latest = subdir / "version_1"
+        pd.DataFrame(_SYNTHETIC_ROWS).to_csv(latest / "schedule.csv", index=False)
+        pd.DataFrame({"pid": [0, 1], "gender": ["m", "f"]}).to_csv(
+            latest / "attrs.csv", index=False
+        )
+    args = _make_args(
+        obs_path,
+        None,
+        batch=str(tmp_path),
+        target_attrs=attrs_csv,
+        split_on=["gender"],
+    )
+    _run(args)
+    out = capsys.readouterr().out
+    assert "model_a" in out
+    assert "attrs" in out
+
+
+def test_run_batch_inconsistent_attrs_without_split_on_succeeds(csv_files, tmp_path, capsys):
+    """Batch with mixed attrs presence and no --split-on succeeds; attrs are ignored."""
     obs_path, _ = csv_files
     for i, name in enumerate(["model_a", "model_b"]):
         subdir = tmp_path / name
@@ -472,5 +534,26 @@ def test_run_batch_inconsistent_attrs_exits(csv_files, tmp_path):
                 subdir / "attrs.csv", index=False
             )
     args = _make_args(obs_path, None, batch=str(tmp_path))
-    with pytest.raises(SystemExit):
-        _run(args)
+    _run(args)
+    assert "model_a" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Progress bar tests
+# ---------------------------------------------------------------------------
+
+
+def test_run_with_progress_enabled(csv_files, capsys):
+    """progress=True (no_progress=False) runs end-to-end without error."""
+    obs_path, syn_path = csv_files
+    args = _make_args(obs_path, [["model", syn_path]], no_progress=False)
+    _run(args)
+    out = capsys.readouterr().out
+    assert "model" in out
+
+
+def test_parser_no_progress_flag():
+    """--no-progress flag is accepted by the parser."""
+    p = _build_parser()
+    args = p.parse_args(["obs.csv", "-m", "m", "syn.csv", "--no-progress"])
+    assert args.no_progress is True

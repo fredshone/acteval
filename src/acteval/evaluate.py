@@ -3,6 +3,8 @@ from functools import cached_property
 from pathlib import Path
 from typing import Literal
 
+from tqdm import tqdm
+
 import numpy as np
 import pandas as pd
 from pandas import DataFrame, MultiIndex, Series, concat
@@ -24,6 +26,43 @@ from acteval._result_frame import ResultFrame
 from acteval._splits import _key_activities
 from acteval.features import creativity, structural
 from acteval.population import Population
+
+
+_ITEM_WIDTH = 25
+
+
+def _make_bar(
+    desc: str,
+    total: int,
+    position: int | None = None,
+    desc_width: int | None = None,
+    colour: str | None = "green",
+) -> tqdm:
+    label = f"{desc:<{desc_width}}" if desc_width else desc
+    full_desc = f"{label}  {'':>{_ITEM_WIDTH}}"
+    bar_format = "{desc} {percentage:3.0f}% │{bar:25}│ {n_fmt:>4}/{total_fmt} [{elapsed}]"
+    kwargs: dict = dict(
+        total=total,
+        desc=full_desc,
+        leave=True,
+        bar_format=bar_format,
+        ascii=" ━",
+        colour=colour,
+    )
+    if position is not None:
+        kwargs["position"] = position
+    bar = tqdm(**kwargs)
+    bar._acteval_label = label
+    return bar
+
+
+def _bar_set_item(bar: tqdm, item: str) -> None:
+    field = f"{item:<{_ITEM_WIDTH}}"[:_ITEM_WIDTH]
+    bar.set_description_str(f"{bar._acteval_label}  {field}", refresh=True)
+
+
+def _bar_clear_item(bar: tqdm) -> None:
+    bar.set_description_str(f"{bar._acteval_label}  {'':>{_ITEM_WIDTH}}", refresh=False)
 
 
 class SplitNotAvailableError(AttributeError):
@@ -316,6 +355,7 @@ class Evaluator:
         split_on: list[str] | None = None,
         config_path=None,
         jobs: EvalConfig | None = None,
+        progress: bool = False,
     ):
         target = _coerce_to_pandas(target)
         if target_attributes is not None:
@@ -372,7 +412,8 @@ class Evaluator:
         self._split_on = split_on
         self._target_pid_features = {}
         self._jobs: EvalConfig = jobs if jobs is not None else get_jobs(config_path)
-        self._precompute_target()
+        self._progress = progress
+        self._precomputed = False
 
     def __repr__(self) -> str:
         pop = self._target_pop
@@ -402,13 +443,24 @@ class Evaluator:
                 ).astype(str)
         return attributes
 
-    def _precompute_target(self) -> None:
+    def _precompute_target(self, feature_bar=None, splits_bar=None) -> None:
         # Phase 1: run every feature function over the full target population,
         # storing per-pid results keyed by (domain, name).  These are cheap to
         # subset later, so we compute them once here rather than once per split.
+        _own_feature_bar = feature_bar is None and self._progress
+        if _own_feature_bar:
+            feature_bar = _make_bar("target [features]", len(self._jobs.density), colour="cyan")
         for spec in self._jobs.density:
+            if feature_bar is not None:
+                _bar_set_item(feature_bar, spec.name)
             key = (spec.domain, spec.name)
             self._target_pid_features[key] = spec.feature_fn(self._target_pop)
+            if feature_bar is not None:
+                feature_bar.update(1)
+        if feature_bar is not None:
+            _bar_clear_item(feature_bar)
+        if _own_feature_bar:
+            feature_bar.close()
 
         # Phase 2: for each (split, category) combination, slice the target
         # population to only the relevant pids and aggregate their features.
@@ -443,7 +495,12 @@ class Evaluator:
             self._jobs.creativity.enabled or self._jobs.structural.needs_novel_pids
         )
 
+        _own_splits_bar = splits_bar is None and self._progress
+        if _own_splits_bar:
+            splits_bar = _make_bar("target [splits]", len(self._split_cat_info), colour="cyan")
         for split, cat, sub_target, cached_subset in self._split_cat_info:
+            if splits_bar is not None:
+                _bar_set_item(splits_bar, cat if split == "__split__" else f"{split}={cat}")
             if _needs_hashes:
                 obs_hash = creativity.hash_population(sub_target)
                 self._obs_hashes[(split, cat)] = obs_hash
@@ -482,12 +539,20 @@ class Evaluator:
                     base[["observed__weight"]].assign(unit=spec.distance_name)
                 )
 
+            if splits_bar is not None:
+                splits_bar.update(1)
+        if splits_bar is not None:
+            _bar_clear_item(splits_bar)
+        if _own_splits_bar:
+            splits_bar.close()
+
         # _base_desc / _base_dist are the "observed" half of the wide DataFrames
         # that compare_splits will build by concatenating model columns alongside.
         self._base_desc = concat(base_desc_parts)
         self._base_dist = concat(base_dist_parts)
         self.collected_descriptions: dict[str, DataFrame] = {}
         self.collected_distances: dict[str, DataFrame] = {}
+        self._precomputed = True
 
     def compare(
         self,
@@ -543,18 +608,65 @@ class Evaluator:
         """
         self.collected_descriptions = {}
         self.collected_distances = {}
+
+        if not self._progress:
+            if not self._precomputed:
+                self._precompute_target()
+            for model, schedule in synthetic_schedules.items():
+                attrs = (
+                    synthetic_attributes[model]
+                    if synthetic_attributes is not None
+                    else None
+                )
+                self.compare_population(
+                    model=model, schedule=schedule, attributes=attrs, verbose=verbose
+                )
+            return self.report()
+
+        # Create all bars upfront so the user sees the full scope of work immediately.
+        n_density = len(self._jobs.density)
+        n_splits = sum(len(self._target_attributes[s].unique()) for s in self._split_on)
+        models = list(synthetic_schedules.keys())
+
+        bar_specs: list[tuple[str, int, str]] = []
+        if not self._precomputed:
+            bar_specs += [
+                ("target [features]", n_density, "cyan"),
+                ("target [splits]", n_splits, "cyan"),
+            ]
+        for model in models:
+            bar_specs += [
+                (f"{model} [features]", n_density, "green"),
+                (f"{model} [splits]", n_splits, "green"),
+            ]
+
+        desc_width = max(len(label) for label, _, _ in bar_specs)
+        bars = [
+            _make_bar(label, total, pos, desc_width, colour)
+            for pos, (label, total, colour) in enumerate(bar_specs)
+        ]
+
+        bar_idx = 0
+        if not self._precomputed:
+            self._precompute_target(feature_bar=bars[0], splits_bar=bars[1])
+            bar_idx = 2
+
         for model, schedule in synthetic_schedules.items():
             attrs = (
-                synthetic_attributes[model]
-                if synthetic_attributes is not None
-                else None
+                synthetic_attributes[model] if synthetic_attributes is not None else None
             )
             self.compare_population(
                 model=model,
                 schedule=schedule,
                 attributes=attrs,
                 verbose=verbose,
+                feature_bar=bars[bar_idx],
+                splits_bar=bars[bar_idx + 1],
             )
+            bar_idx += 2
+
+        for bar in bars:
+            bar.close()
 
         return self.report()
 
@@ -564,6 +676,9 @@ class Evaluator:
         schedule: DataFrame,
         attributes: DataFrame | None = None,
         verbose: bool = False,
+        *,
+        feature_bar=None,
+        splits_bar=None,
     ) -> None:
         """Compute description and distance columns for a single synthetic population.
 
@@ -579,6 +694,9 @@ class Evaluator:
                 (or pass ``None``) when no splits are in use.
             verbose: Print progress.
         """
+        if not self._precomputed:
+            self._precompute_target()
+
         schedule = _coerce_to_pandas(schedule)
         if attributes is not None:
             attributes = _coerce_to_pandas(attributes)
@@ -603,17 +721,29 @@ class Evaluator:
                 )
         attributes = self._apply_numeric_bins(attributes)
         pop = Population(schedule)
-        pid_features = {
-            (spec.domain, spec.name): spec.feature_fn(pop)
-            for spec in self._jobs.density
-        }
+
+        _own_feature_bar = feature_bar is None and self._progress
+        if _own_feature_bar:
+            feature_bar = _make_bar(f"{model} [features]", len(self._jobs.density))
+        pid_features = {}
+        for spec in self._jobs.density:
+            if feature_bar is not None:
+                _bar_set_item(feature_bar, spec.name)
+            pid_features[(spec.domain, spec.name)] = spec.feature_fn(pop)
+            if feature_bar is not None:
+                feature_bar.update(1)
+        if feature_bar is not None:
+            _bar_clear_item(feature_bar)
+        if _own_feature_bar:
+            feature_bar.close()
+
         description_parts: list[DataFrame] = []
         distance_parts: list[DataFrame] = []
 
-        # Phase 1: pre-compute full-population features once (mirrors
-        # _precompute_target Phase 1).  Creativity hashes and structural
-        # feasibility flags are computed here for the entire synthetic
-        # population; the split loop below only subsets them.
+        # Pre-compute full-population features once (mirrors _precompute_target
+        # Phase 1).  Creativity hashes and structural feasibility flags are
+        # computed here for the entire synthetic population; the split loop
+        # below only subsets them.
         _needs_hashes = (
             self._jobs.creativity.enabled or self._jobs.structural.needs_novel_pids
         )
@@ -622,9 +752,14 @@ class Evaluator:
         if self._jobs.structural.enabled:
             feasibility_flags = structural.feasibility(pop)
 
-        # Phase 2: iterate over (split, category) combinations and subset the
+        # Iterate over (split, category) combinations and subset the
         # pre-computed features down to the relevant pids.
+        _own_splits_bar = splits_bar is None and self._progress
+        if _own_splits_bar:
+            splits_bar = _make_bar(f"{model} [splits]", len(self._split_cat_info))
         for split, cat, _, cached_subset in self._split_cat_info:
+            if splits_bar is not None:
+                _bar_set_item(splits_bar, cat if split == "__split__" else f"{split}={cat}")
             sample_pids = attributes[attributes[split] == cat].pid.values
             if verbose:
                 print(f">>> Subsampled {model} {split}={cat} with {len(sample_pids)}")
@@ -715,6 +850,13 @@ class Evaluator:
                 )
                 description_parts.append(desc_part)
                 distance_parts.append(dist_part)
+
+            if splits_bar is not None:
+                splits_bar.update(1)
+        if splits_bar is not None:
+            _bar_clear_item(splits_bar)
+        if _own_splits_bar:
+            splits_bar.close()
 
         # Store results so compare_splits can later concat them with _base_desc/dist.
         self.collected_descriptions[model] = concat(

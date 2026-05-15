@@ -95,10 +95,26 @@ def _classify_file(path: str) -> str:
             f"{path}: cannot classify — has 'pid' but no 'act' and no attribute "
             f"columns beyond {sorted(_KNOWN_COLS - {'act'})}; found: {sorted(cols)}"
         )
-    sys.exit(f"{path}: cannot classify — missing 'pid' column; found: {sorted(cols)}")
+    return "other"
 
 
-def _discover_batch(batch_dir: str) -> list[tuple[str, str, str | None]]:
+def _latest_version_subdir(subdir: Path) -> Path | None:
+    """Return the version_N subdir with the highest N, or None."""
+    version_dirs = [
+        p
+        for p in subdir.iterdir()
+        if p.is_dir()
+        and p.name.startswith("version_")
+        and p.name[len("version_") :].isdigit()
+    ]
+    if not version_dirs:
+        return None
+    return max(version_dirs, key=lambda p: int(p.name[len("version_") :]))
+
+
+def _discover_batch(
+    batch_dir: str, attributes_required: bool = False
+) -> list[tuple[str, str, str | None]]:
     """Discover model subdirs within *batch_dir* and classify their files.
 
     Returns [(model_name, schedule_path, attrs_path | None), ...].
@@ -114,18 +130,24 @@ def _discover_batch(batch_dir: str) -> list[tuple[str, str, str | None]]:
         sys.exit(f"--batch: no subdirectories found in {batch_dir!r}")
 
     _EXTS = {".csv", ".parquet", ".pq"}
-    results: list[tuple[str, str, str | None]] = []
+    results: dict[list[str, str | None]] = {}
 
+    # discover schedules
     for subdir in subdirs:
         files = sorted(p for p in subdir.iterdir() if p.suffix in _EXTS and p.is_file())
+        if not files:
+            version_dir = _latest_version_subdir(subdir)
+            if version_dir is not None:
+                files = sorted(
+                    p
+                    for p in version_dir.iterdir()
+                    if p.suffix in _EXTS and p.is_file()
+                )
         schedules: list[Path] = []
-        attr_files: list[Path] = []
         for f in files:
             kind = _classify_file(str(f))
             if kind == "schedule":
                 schedules.append(f)
-            else:
-                attr_files.append(f)
 
         if len(schedules) == 0:
             sys.exit(f"--batch: no schedule file found in {str(subdir)!r}")
@@ -134,27 +156,54 @@ def _discover_batch(batch_dir: str) -> list[tuple[str, str, str | None]]:
                 f"--batch: multiple schedule files found in {str(subdir)!r}: "
                 f"{[str(s) for s in schedules]}"
             )
-        if len(attr_files) > 1:
+
+        results[subdir.name] = [str(schedules[0]), None]
+
+    # discover attributes
+    if attributes_required:
+        for subdir in subdirs:
+            files = sorted(
+                p for p in subdir.iterdir() if p.suffix in _EXTS and p.is_file()
+            )
+            if not files:
+                version_dir = _latest_version_subdir(subdir)
+                if version_dir is not None:
+                    files = sorted(
+                        p
+                        for p in version_dir.iterdir()
+                        if p.suffix in _EXTS and p.is_file()
+                    )
+            attr_files: list[Path] = []
+            for f in files:
+                kind = _classify_file(str(f))
+                if kind == "attrs":
+                    attr_files.append(f)
+
+            if len(attr_files) > 1:
+                sys.exit(
+                    f"--batch: multiple attributes files found in {str(subdir)!r}: "
+                    f"{[str(a) for a in attr_files]}"
+                )
+
+            attrs_path = str(attr_files[0]) if attr_files else None
+            results[subdir.name][1] = attrs_path
+
+        # check for consistency in attrs presence across models
+        has_attrs_flags = [r[1] is not None for r in results.values()]
+        if not all(has_attrs_flags):
+            missing = [n for n, r in results.items() if r[1] is None]
             sys.exit(
-                f"--batch: multiple attributes files found in {str(subdir)!r}: "
-                f"{[str(a) for a in attr_files]}"
+                f"--batch: missing attributes — some model directories require "
+                f"attributes files; missing for: {missing}"
             )
 
-        attrs_path = str(attr_files[0]) if attr_files else None
-        results.append((subdir.name, str(schedules[0]), attrs_path))
-
-    has_attrs_flags = [r[2] is not None for r in results]
-    if any(has_attrs_flags) and not all(has_attrs_flags):
-        missing = [r[0] for r in results if r[2] is None]
-        sys.exit(
-            f"--batch: inconsistent attributes — some model directories have "
-            f"attributes files and some do not; missing for: {missing}"
-        )
-
     print(f"Discovered {len(results)} model(s) from {batch_dir!r}:")
-    for name, sched, attrs in results:
+    for name, (sched, attrs) in results.items():
         attrs_str = f", attrs: {attrs}" if attrs else ""
         print(f"  {name}: schedule: {sched}{attrs_str}")
+
+    # flatten to list to match arg spec
+    results = [[name, scheds, attrs] for name, (scheds, attrs) in results.items()]
 
     return results
 
@@ -205,6 +254,11 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="BATCH_DIR",
         help="Directory of model subdirs; schedule and attrs auto-discovered per subdir",
     )
+    p.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable progress bars",
+    )
     return p
 
 
@@ -219,6 +273,16 @@ def _run(args: argparse.Namespace) -> None:
     target = _load_df(args.target)
     _validate_schedule(target, args.target)
     target = _derive_timing(target)
+
+    # --- split-on requires attrs (and vice versa) ---
+    if bool(args.split_on) and not bool(args.target_attrs):
+        sys.exit("--split-on required TARGET_ATTRS be specified")
+
+    # --- load target attributes ---
+    target_attributes: pd.DataFrame | None = None
+    if args.target_attrs:
+        target_attributes = _load_df(args.target_attrs)
+        _validate_attrs(target_attributes, args.target_attrs, args.split_on)
 
     # --- build model specs: (name, schedule_path, attrs_path | None) ---
     model_specs: list[tuple[str, str, str | None]] = []
@@ -235,7 +299,9 @@ def _run(args: argparse.Namespace) -> None:
                     f"got {len(spec)}: {spec}"
                 )
     else:
-        model_specs = _discover_batch(args.batch)
+        model_specs = _discover_batch(
+            args.batch, attributes_required=bool(args.split_on)
+        )
 
     # --- load synthetic models ---
     synthetic: dict[str, pd.DataFrame] = {}
@@ -279,23 +345,14 @@ def _run(args: argparse.Namespace) -> None:
                 f"missing for: {missing_model_attrs}"
             )
 
-    # --- split-on requires attrs (and vice versa) ---
-    if bool(args.split_on) != bool(args.target_attrs):
-        sys.exit("--split-on and TARGET_ATTRS must be specified together")
-
-    # --- load target attributes ---
-    target_attributes: pd.DataFrame | None = None
-    if args.target_attrs:
-        target_attributes = _load_df(args.target_attrs)
-        _validate_attrs(target_attributes, args.target_attrs, args.split_on)
-
     # --- evaluate ---
     print(f"acteval — comparing {len(synthetic)} model(s) to {args.target}\n")
     evaluator = Evaluator(
         target,
-        target_attributes=target_attributes,
+        target_attributes=target_attributes if args.split_on else None,
         split_on=args.split_on,
         config_path=args.config,
+        progress=not args.no_progress,
     )
     # Attrs are only meaningful for splitting; don't pass them when split_on is absent
     attrs_for_evaluator = attributes if args.split_on else None
@@ -311,28 +368,30 @@ def _run(args: argparse.Namespace) -> None:
         levels_to_print = {args.level, "domains"}
 
     if "features" in levels_to_print:
-        print("Feature distances:")
-        print_markdown(result.features.combined.distances)
         if result.has_splits:
             print("\nFeature distances by attribute:")
             print_markdown(result.features.by_attribute.distances)
+        print("Feature distances:")
+        print_markdown(result.features.combined.distances)
 
     if "groups" in levels_to_print:
-        print("\nGroup distances:")
-        print_markdown(result.groups.combined.distances)
         if result.has_splits:
             print("\nGroup distances by attribute:")
             print_markdown(result.groups.by_attribute.distances)
+        print("\nGroup distances:")
+        print_markdown(result.groups.combined.distances)
 
     if "domains" in levels_to_print:
-        print("\nDomain distances (lower is better):")
-        print_markdown(result.domains.combined.distances)
         if result.has_splits:
             print("\nDomain distances by attribute:")
             print_markdown(result.domains.by_attribute.distances)
+        print("\nDomain distances (lower is better):")
+        print_markdown(result.domains.combined.distances)
 
     ranked = result.rank_models()
-    print(f"\nMean distance: {dict(ranked)}")
+    print(f"\nMean distances:")
+    for k, v in ranked.items():
+        print(f"\t{k}: {v}")
     print(f"Best model: {result.best_model}")
 
     # --- save ---
@@ -368,12 +427,16 @@ def _build_filter_parser() -> argparse.ArgumentParser:
         metavar="ACT",
         help="Activities to check for consecutive duplicates (default: home work education)",
     )
-    cons.add_argument("--output", "-o", metavar="FILE", help="Path to save filtered CSV")
+    cons.add_argument(
+        "--output", "-o", metavar="FILE", help="Path to save filtered CSV"
+    )
 
     return p
 
 
-def _filter_and_output(df: pd.DataFrame, mask: np.ndarray, population: Population, output: str | None) -> None:
+def _filter_and_output(
+    df: pd.DataFrame, mask: np.ndarray, population: Population, output: str | None
+) -> None:
     """Filter df to rows belonging to pids flagged by mask and write output."""
     flagged_pids = population.unique_pids_original[mask]
     result = df[df["pid"].isin(flagged_pids)]

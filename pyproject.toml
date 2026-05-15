@@ -12,6 +12,7 @@ dependencies = [
     "tabulate",
     "tomli>=1.1.0; python_version < '3.11'",
     "tslearn",
+    "tqdm",
 ]
 
 [tool.uv]
