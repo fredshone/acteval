@@ -34,7 +34,17 @@ def _read_columns(path: str) -> set[str]:
             return set(pq.read_schema(str(p)).names)
         except ImportError:
             sys.exit(f"Reading {p} requires pyarrow: pip install pyarrow")
-    return set(pd.read_csv(p, nrows=0).columns)
+    elif p.suffix == ".tab":
+        try:
+            return set(pd.read_csv(p, nrows=0, sep="\t").columns)
+        except pd.errors.EmptyDataError:
+            return set()
+    elif p.suffix == ".csv":
+        try:
+            return set(pd.read_csv(p, nrows=0).columns)
+        except pd.errors.EmptyDataError:
+            return set()
+    return set()
 
 
 def _validate_schedule(df: pd.DataFrame, path: str) -> None:
