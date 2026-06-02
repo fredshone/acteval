@@ -28,6 +28,7 @@ def frequency_plots(observed, ys: Optional[dict], **kwargs):
         colors = cmap.colors
         factor = (len(acts) // len(colors)) + 1
         cmap = dict(zip(acts, colors * factor))
+    kwargs["color"] = cmap
 
     fig, axs = plt.subplots(
         sharex=True,
