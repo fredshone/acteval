@@ -3,11 +3,10 @@ from functools import cached_property
 from pathlib import Path
 from typing import Literal
 
-from tqdm import tqdm
-
 import numpy as np
 import pandas as pd
 from pandas import DataFrame, MultiIndex, Series, concat
+from tqdm import tqdm
 
 from acteval._aggregation import DEFAULT_REMOVE_FEATURES, DEFAULT_REMOVE_GROUPS
 from acteval._compat import _coerce_to_pandas, _is_dataframe
@@ -27,7 +26,6 @@ from acteval._splits import _key_activities
 from acteval.features import creativity, structural
 from acteval.population import Population
 
-
 _ITEM_WIDTH = 25
 
 
@@ -40,7 +38,9 @@ def _make_bar(
 ) -> tqdm:
     label = f"{desc:<{desc_width}}" if desc_width else desc
     full_desc = f"{label}  {'':>{_ITEM_WIDTH}}"
-    bar_format = "{desc} {percentage:3.0f}% │{bar:25}│ {n_fmt:>4}/{total_fmt} [{elapsed}]"
+    bar_format = (
+        "{desc} {percentage:3.0f}% │{bar:25}│ {n_fmt:>4}/{total_fmt} [{elapsed}]"
+    )
     kwargs: dict = dict(
         total=total,
         desc=full_desc,
@@ -449,7 +449,9 @@ class Evaluator:
         # subset later, so we compute them once here rather than once per split.
         _own_feature_bar = feature_bar is None and self._progress
         if _own_feature_bar:
-            feature_bar = _make_bar("target [features]", len(self._jobs.density), colour="cyan")
+            feature_bar = _make_bar(
+                "target [features]", len(self._jobs.density), colour="cyan"
+            )
         for spec in self._jobs.density:
             if feature_bar is not None:
                 _bar_set_item(feature_bar, spec.name)
@@ -497,10 +499,14 @@ class Evaluator:
 
         _own_splits_bar = splits_bar is None and self._progress
         if _own_splits_bar:
-            splits_bar = _make_bar("target [splits]", len(self._split_cat_info), colour="cyan")
+            splits_bar = _make_bar(
+                "target [splits]", len(self._split_cat_info), colour="cyan"
+            )
         for split, cat, sub_target, cached_subset in self._split_cat_info:
             if splits_bar is not None:
-                _bar_set_item(splits_bar, cat if split == "__split__" else f"{split}={cat}")
+                _bar_set_item(
+                    splits_bar, cat if split == "__split__" else f"{split}={cat}"
+                )
             if _needs_hashes:
                 obs_hash = creativity.hash_population(sub_target)
                 self._obs_hashes[(split, cat)] = obs_hash
@@ -518,7 +524,9 @@ class Evaluator:
                 base_dist_parts.append(bi.drop("observed", axis=1))
 
             if self._jobs.structural.enabled:
-                base_struct = _observed_base_structural(sub_target, self._jobs.structural)
+                base_struct = _observed_base_structural(
+                    sub_target, self._jobs.structural
+                )
                 base_struct.index = MultiIndex.from_tuples(
                     [(*i, split, cat) for i in base_struct.index],
                     names=list(base_struct.index.names) + ["label", "cat"],
@@ -653,7 +661,9 @@ class Evaluator:
 
         for model, schedule in synthetic_schedules.items():
             attrs = (
-                synthetic_attributes[model] if synthetic_attributes is not None else None
+                synthetic_attributes[model]
+                if synthetic_attributes is not None
+                else None
             )
             self.compare_population(
                 model=model,
@@ -759,10 +769,10 @@ class Evaluator:
             splits_bar = _make_bar(f"{model} [splits]", len(self._split_cat_info))
         for split, cat, _, cached_subset in self._split_cat_info:
             if splits_bar is not None:
-                _bar_set_item(splits_bar, cat if split == "__split__" else f"{split}={cat}")
+                _bar_set_item(
+                    splits_bar, cat if split == "__split__" else f"{split}={cat}"
+                )
             sample_pids = attributes[attributes[split] == cat].pid.values
-            if verbose:
-                print(f">>> Subsampled {model} {split}={cat} with {len(sample_pids)}")
             synth_dense_pids = pop.dense_pids_from_original(sample_pids)
             # Used below to skip density segments whose key activity is absent
             # from this synthetic sub-population entirely.
