@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-from acteval.describe.plot import _POPULATION_PALETTE, BG, _save, _subplots
+from acteval.plot.plot import _POPULATION_PALETTE, BG, _save, _subplots
 
 
 def heatmap(
@@ -89,7 +89,7 @@ def groups(
     matplotlib.figure.Figure
     """
     palette = palette or _POPULATION_PALETTE
-    gd = result.group_distances[result.model_names]
+    gd = result.groups.combined.distances[result.model_names]
     # sort rows by mean distance descending so the largest distances appear at top
     gd = (
         gd.assign(_mean=gd.mean(axis=1))

@@ -1,41 +1,53 @@
 from pandas import DataFrame
 
+from acteval.population import Population
 
-def hash_schedule(schedule: DataFrame) -> list[str]:
+
+def hash_schedule(population: Population) -> str:
     """Hash a schedule. We first create strings of combined activities and durations.
 
     Args:
-        schedule (DataFrame): Input schedule.
+        population (Population): Input population, expected to hold a single
+            person's schedule (rows already in temporal order).
 
     Returns:
         str: hashed schedule.
     """
-    act_hash = schedule.act.astype(str) + schedule.duration.astype(str)
+    act_hash = [str(a) + str(d) for a, d in zip(population.acts, population.durations)]
     return "".join(act_hash)
 
 
-def hash_per_pid(population: DataFrame) -> dict:
+def hash_per_pid(population: Population) -> dict:
     """Hash each person's schedule, returning {pid: hash_str}.
 
     Unlike ``hash_population``, duplicates are preserved so the result can be
     subsetted by pid before collapsing to a set.
 
+    Uses ``population.durations`` (derived from whichever two of start/end/
+    duration were supplied) rather than a raw ``duration`` column, so this
+    works for any population regardless of which timing columns it started with.
+
     Args:
-        population (DataFrame): Input population of sequences.
+        population (Population): Input population of sequences.
 
     Returns:
-        dict: Mapping of pid → hash string.
+        dict: Mapping of original pid → hash string.
     """
-    act_hash = population.act.astype(str) + population.duration.astype(str)
-    return act_hash.groupby(population.pid).apply("".join).to_dict()
+    act_hash = [str(a) + str(d) for a, d in zip(population.acts, population.durations)]
+    return {
+        pid: "".join(act_hash[start:end])
+        for pid, start, end in zip(
+            population.unique_pids_original, population.pid_starts, population.pid_ends
+        )
+    }
 
 
-def hash_population(population: DataFrame) -> set[str]:
+def hash_population(population: Population) -> set[str]:
     """Hash a population of sequences. We first create strings of combined activities and durations.
     Then create a python set of these strings. This will remove duplicates.
 
     Args:
-        population (DataFrame): Input population of sequences.
+        population (Population): Input population of sequences.
 
     Returns:
         set[str]: set of hashed sequences.

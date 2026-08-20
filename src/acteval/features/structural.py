@@ -52,9 +52,9 @@ def feasibility(population: Population) -> dict[str, ndarray]:
     not_end_at_home = last_acts != "home"
     not_home_based = not_start_at_home | not_end_at_home
 
-    consecutive_home = _get_consecutives(pids, acts, unique_pids, "home")
-    consecutive_work = _get_consecutives(pids, acts, unique_pids, "work")
-    consecutive_education = _get_consecutives(pids, acts, unique_pids, "education")
+    consecutive_home = get_consecutives(pids, acts, unique_pids, "home")
+    consecutive_work = get_consecutives(pids, acts, unique_pids, "work")
+    consecutive_education = get_consecutives(pids, acts, unique_pids, "education")
     consecutive = consecutive_home | consecutive_work | consecutive_education
 
     return {
@@ -158,7 +158,7 @@ def feasibility_eval(
     )
 
 
-def _get_consecutives(
+def get_consecutives(
     pids: ndarray, acts: ndarray, unique_pids: ndarray, target: str
 ) -> ndarray:
     """Check which pids have consecutive occurrences of target activity.

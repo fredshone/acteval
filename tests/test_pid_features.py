@@ -2,13 +2,15 @@
 
 Verifies:
 - ``fn(pop).subset(pids).aggregate()`` equals ``fn(Population(filtered_df)).aggregate()``
-- ``Evaluator.compare_splits`` produces identical output to old ``subsample_and_evaluate``
+- split-based comparison (``compare(..., target_attributes=..., split_on=...)`` /
+  ``Evaluator.compare(attributes=...)``) matches manual per-model accumulation
 """
 
 import numpy as np
+import pytest
 from pandas import DataFrame
 
-from acteval.evaluate import Evaluator, compare_splits
+from acteval.evaluate import Evaluator, compare
 from acteval.features import participation, structural, times
 from acteval.features.transitions import full_sequences, ngrams
 from acteval.population import Population
@@ -206,7 +208,7 @@ def test_empty_population():
 
 
 # ---------------------------------------------------------------------------
-# Evaluator.compare_splits
+# Split-based comparison: compare(..., target_attributes=..., split_on=...)
 # ---------------------------------------------------------------------------
 
 
@@ -235,12 +237,12 @@ def _split_data():
     return observed, synthetic, target_attrs, synth_attrs
 
 
-def test_compare_splits_runs():
+def test_compare_split_by_attribute_runs():
     observed, synthetic, target_attrs, synth_attrs = _split_data()
-    result = compare_splits(
-        observed=observed,
-        synthetic_schedules={"m": synthetic},
-        synthetic_attributes={"m": synth_attrs},
+    result = compare(
+        observed,
+        {"m": synthetic},
+        attributes={"m": synth_attrs},
         target_attributes=target_attrs,
         split_on=["gender"],
     )
@@ -255,14 +257,17 @@ def test_compare_splits_runs():
         "feature",
         "label",
     ]
+    assert result.at("groups", "by_attribute").distances.equals(
+        result.groups.by_attribute.distances
+    )
 
 
-def test_evaluator_compare_splits():
+def test_evaluator_compare_split_by_attribute():
     observed, synthetic, target_attrs, synth_attrs = _split_data()
     evaluator = Evaluator(observed, target_attrs, ["gender"])
-    result = evaluator.compare_populations(
-        synthetic_schedules={"m": synthetic},
-        synthetic_attributes={"m": synth_attrs},
+    result = evaluator.compare(
+        synthetic={"m": synthetic},
+        attributes={"m": synth_attrs},
     )
     assert result.has_splits
     assert result.groups.by_attribute.distances.index.names == [
@@ -272,13 +277,13 @@ def test_evaluator_compare_splits():
     ]
 
 
-def test_compare_splits_two_models():
+def test_compare_split_by_attribute_two_models():
     observed, synthetic, target_attrs, synth_attrs = _split_data()
     synthetic2 = synthetic.copy()
-    result = compare_splits(
-        observed=observed,
-        synthetic_schedules={"m1": synthetic, "m2": synthetic2},
-        synthetic_attributes={"m1": synth_attrs, "m2": synth_attrs},
+    result = compare(
+        observed,
+        {"m1": synthetic, "m2": synthetic2},
+        attributes={"m1": synth_attrs, "m2": synth_attrs},
         target_attributes=target_attrs,
         split_on=["gender"],
     )
@@ -311,16 +316,35 @@ def test_compare_population_no_attributes_no_splits():
     assert "m" in result.features.combined.distances.columns
 
 
-def test_compare_population_matches_compare_splits():
+def test_compare_missing_attributes_for_some_models_raises_upfront():
+    """When splits are configured, a missing per-model attributes entry should be
+    caught for *all* affected models before any comparison work starts."""
+    observed, synthetic, target_attrs, synth_attrs = _split_data()
+    evaluator = Evaluator(observed, target_attrs, ["gender"])
+    with pytest.raises(ValueError, match=r"m2"):
+        evaluator.compare(
+            synthetic={"m1": synthetic, "m2": synthetic},
+            attributes={"m1": synth_attrs},
+        )
+
+
+def test_compare_missing_attributes_entirely_raises_upfront():
+    observed, synthetic, target_attrs, synth_attrs = _split_data()
+    evaluator = Evaluator(observed, target_attrs, ["gender"])
+    with pytest.raises(ValueError, match=r"attributes .* is required"):
+        evaluator.compare(synthetic={"m1": synthetic})
+
+
+def test_compare_population_matches_compare():
     observed, synthetic, target_attrs, synth_attrs = _split_data()
     evaluator = Evaluator(observed, target_attrs, ["gender"])
 
     evaluator.compare_population("m", synthetic, synth_attrs)
     manual_result = evaluator.report()
 
-    split_result = evaluator.compare_populations(
-        synthetic_schedules={"m": synthetic},
-        synthetic_attributes={"m": synth_attrs},
+    split_result = evaluator.compare(
+        synthetic={"m": synthetic},
+        attributes={"m": synth_attrs},
     )
 
     for getter in (

@@ -5,6 +5,7 @@ Provides two groups of functions:
 1. **Per-feature aggregation** (formerly ``ops.py``):
    ``feature_weight``, ``average``, ``time_average``, ``average2d`` — compute
    weighted statistics over a ``{key: (values, weights)}`` feature dict.
+   These are the ``describe_fn`` implementations plugged into ``JobSpec``.
 
 2. **Multi-tier collapse** (formerly ``post_process.py``):
    Collapse raw per-segment rows upward through the three output tiers using
@@ -47,64 +48,6 @@ DEFAULT_REMOVE_GROUPS: list[tuple] = [
     ("feasibility", "not home based"),
     ("feasibility", "consecutive"),
 ]
-
-# Backward-compatible aliases (keep old names importable).
-_REMOVE_FEATURES = DEFAULT_REMOVE_FEATURES
-_REMOVE_GROUPS = DEFAULT_REMOVE_GROUPS
-
-
-def _drop_features(df: DataFrame, features: list[tuple]) -> DataFrame:
-    """Drop rows from *df* whose index prefix matches any entry in *features*.
-
-    .. deprecated::
-        Use ``ResultFrame.drop_rows()`` instead.  This function is kept for
-        any callers that still operate on plain DataFrames.
-    """
-    sorted_df = df.sort_index()
-    if not features:
-        return df
-    n = len(features[0])
-    feature_set = set(features)
-    to_drop = [idx for idx in sorted_df.index if idx[:n] in feature_set]
-    if not to_drop:
-        return df
-    return sorted_df.drop(to_drop, axis=0)
-
-
-# ---------------------------------------------------------------------------
-# Weighted aggregation helpers (kept for backward compatibility)
-# ---------------------------------------------------------------------------
-
-
-def weighted_average(report: DataFrame, suffix: str = "__weight") -> Series:
-    """Weighted average of dataframe using weights in the weight column."""
-    cols = [c for c in report.columns if not c.endswith(suffix)]
-    scores = DataFrame()
-    for c in cols:
-        weights = report[f"{c}{suffix}"]
-        total = weights.sum()
-        scores[c] = report[c] * weights / total
-    return scores.sum()
-
-
-def distance_weighted_average(
-    report: DataFrame,
-    base_col: str = "observed__weight",
-    suffix: str = "__weight",
-) -> Series:
-    """Weighted average using both model weights and base weights.
-
-    Averaging base and model weights handles cases where models have different
-    feature coverage — features present in only one side get half-weight.
-    """
-    cols = [c for c in report.columns if not c.endswith(suffix)]
-    base_weights = report[base_col]
-    scores = DataFrame()
-    for c in cols:
-        weights = (report[f"{c}{suffix}"] + base_weights) / 2
-        total = weights.sum()
-        scores[c] = report[c] * weights / total
-    return scores.sum()
 
 
 # ---------------------------------------------------------------------------

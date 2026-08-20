@@ -39,9 +39,9 @@ full_sequences = false  # full abbreviated tour-string distributions (e.g. h>w>h
 diversity = true   # enables diversity (description) + homogeneity (distance)
 novelty   = true   # enables novelty (description) + conservatism (distance)
 
-# Structural / feasibility metrics: home-based schedules, no consecutive duplicates.
+# Feasibility metrics: home-based schedules, no consecutive duplicates.
 # *_novel variants evaluate only schedules not present in the observed population.
-[jobs.structural]
+[jobs.feasibility]
 home_based        = true
 home_based_novel  = false
 consecutive       = true

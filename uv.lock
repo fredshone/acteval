@@ -18,6 +18,7 @@ dependencies = [
     { name = "pot" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "seaborn" },
     { name = "tabulate" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "tqdm" },
@@ -27,13 +28,11 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "black" },
-    { name = "matplotlib" },
     { name = "polars" },
     { name = "pytest" },
     { name = "pytest-benchmark" },
     { name = "pytest-cov" },
     { name = "ruff" },
-    { name = "seaborn" },
 ]
 
 [package.metadata]
@@ -43,6 +42,7 @@ requires-dist = [
     { name = "pandas" },
     { name = "pot" },
     { name = "scipy" },
+    { name = "seaborn" },
     { name = "tabulate" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=1.1.0" },
     { name = "tqdm" },
@@ -52,13 +52,11 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "black" },
-    { name = "matplotlib", specifier = ">=3.7.5" },
     { name = "polars", specifier = ">=1.8.2" },
     { name = "pytest" },
     { name = "pytest-benchmark" },
     { name = "pytest-cov" },
     { name = "ruff" },
-    { name = "seaborn", specifier = ">=0.13.2" },
 ]
 
 [[package]]

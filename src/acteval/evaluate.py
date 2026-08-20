@@ -6,7 +6,6 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 from pandas import DataFrame, MultiIndex, Series, concat
-from tqdm import tqdm
 
 from acteval._aggregation import DEFAULT_REMOVE_FEATURES, DEFAULT_REMOVE_GROUPS
 from acteval._compat import _coerce_to_pandas, _is_dataframe
@@ -21,48 +20,43 @@ from acteval._pipeline import (
     _observed_base_creativity,
     _observed_base_structural,
 )
+from acteval._progress import bar_clear_item as _bar_clear_item
+from acteval._progress import bar_set_item as _bar_set_item
+from acteval._progress import make_bar as _make_bar
 from acteval._result_frame import ResultFrame
 from acteval._splits import _key_activities
 from acteval.features import creativity, structural
 from acteval.population import Population
 
-_ITEM_WIDTH = 25
 
+def _append_split_cat_index(df: DataFrame, split: str, cat) -> DataFrame:
+    """Append ``(split, cat)`` as trailing ``label``/``cat`` MultiIndex levels.
 
-def _make_bar(
-    desc: str,
-    total: int,
-    position: int | None = None,
-    desc_width: int | None = None,
-    colour: str | None = "green",
-) -> tqdm:
-    label = f"{desc:<{desc_width}}" if desc_width else desc
-    full_desc = f"{label}  {'':>{_ITEM_WIDTH}}"
-    bar_format = (
-        "{desc} {percentage:3.0f}% │{bar:25}│ {n_fmt:>4}/{total_fmt} [{elapsed}]"
+    Shared by creativity and structural rows, whose index already has its
+    final shape (domain, feature, segment, ...) before this split/category
+    tag is added.
+    """
+    df.index = MultiIndex.from_tuples(
+        [(*i, split, cat) for i in df.index],
+        names=list(df.index.names) + ["label", "cat"],
     )
-    kwargs: dict = dict(
-        total=total,
-        desc=full_desc,
-        leave=True,
-        bar_format=bar_format,
-        ascii=" ━",
-        colour=colour,
+    return df
+
+
+def _tag_density_index(
+    df: DataFrame, domain: str, feature: str, split: str, cat
+) -> DataFrame:
+    """Turn a flat segment index into (domain, feature, segment, label, cat).
+
+    Density rows start with only a flat ``segment`` index (unlike creativity/
+    structural, which already carry ``domain``/``feature``/``segment``), so
+    this injects the two leading levels alongside the split/category tag.
+    """
+    df.index = MultiIndex.from_tuples(
+        [(domain, feature, f, split, cat) for f in df.index],
+        names=["domain", "feature", "segment", "label", "cat"],
     )
-    if position is not None:
-        kwargs["position"] = position
-    bar = tqdm(**kwargs)
-    bar._acteval_label = label
-    return bar
-
-
-def _bar_set_item(bar: tqdm, item: str) -> None:
-    field = f"{item:<{_ITEM_WIDTH}}"[:_ITEM_WIDTH]
-    bar.set_description_str(f"{bar._acteval_label}  {field}", refresh=True)
-
-
-def _bar_clear_item(bar: tqdm) -> None:
-    bar.set_description_str(f"{bar._acteval_label}  {'':>{_ITEM_WIDTH}}", refresh=False)
+    return df
 
 
 class SplitNotAvailableError(AttributeError):
@@ -293,6 +287,36 @@ class EvalResult:
             drop_groups=DEFAULT_REMOVE_GROUPS,
         )
 
+    # --- flexible accessor ---
+
+    _LEVELS = ("features", "groups", "domains")
+    _SPLITS = ("combined", "by_attribute", "by_category")
+
+    def at(self, level: str = "domains", split: str = "combined") -> AggregatedResult:
+        """Get an ``AggregatedResult`` at the given level and split.
+
+        The one thing to remember for anything beyond ``summary()`` /
+        ``rank_models()`` / ``best_model``: equivalent to chaining the
+        ``.features``/``.groups``/``.domains`` and
+        ``.combined``/``.by_attribute``/``.by_category`` properties, e.g.
+        ``result.at("groups", "by_attribute")`` is ``result.groups.by_attribute``.
+
+        Args:
+            level: One of "features", "groups", "domains".
+            split: One of "combined", "by_attribute", "by_category".
+
+        Returns:
+            The requested ``AggregatedResult``.
+
+        Raises:
+            ValueError: If ``level`` or ``split`` is not one of the allowed values.
+        """
+        if level not in self._LEVELS:
+            raise ValueError(f"level must be one of {self._LEVELS}, got {level!r}")
+        if split not in self._SPLITS:
+            raise ValueError(f"split must be one of {self._SPLITS}, got {split!r}")
+        return getattr(getattr(self, level), split)
+
     # --- model introspection ---
 
     @property
@@ -356,6 +380,7 @@ class Evaluator:
         config_path=None,
         jobs: EvalConfig | None = None,
         progress: bool = False,
+        disable: list[str] | None = None,
     ):
         target = _coerce_to_pandas(target)
         if target_attributes is not None:
@@ -411,9 +436,16 @@ class Evaluator:
         self._target_attributes = target_attributes
         self._split_on = split_on
         self._target_pid_features = {}
-        self._jobs: EvalConfig = jobs if jobs is not None else get_jobs(config_path)
+        self._jobs: EvalConfig = (
+            jobs if jobs is not None else get_jobs(config_path, disable)
+        )
         self._progress = progress
         self._precomputed = False
+        # Progress bars for the model currently being processed by
+        # compare_population(); set by _compare_populations() so bar plumbing
+        # doesn't have to appear in compare_population()'s public signature.
+        self._active_feature_bar = None
+        self._active_splits_bar = None
 
     def __repr__(self) -> str:
         pop = self._target_pop
@@ -508,18 +540,15 @@ class Evaluator:
                     splits_bar, cat if split == "__split__" else f"{split}={cat}"
                 )
             if _needs_hashes:
-                obs_hash = creativity.hash_population(sub_target)
+                obs_hash = creativity.hash_population(Population(sub_target))
                 self._obs_hashes[(split, cat)] = obs_hash
 
             if self._jobs.creativity.enabled:
                 bd, bi = _observed_base_creativity(
                     sub_target, self._obs_hashes[(split, cat)], self._jobs.creativity
                 )
-                for df in (bd, bi):
-                    df.index = MultiIndex.from_tuples(
-                        [(*i, split, cat) for i in df.index],
-                        names=list(df.index.names) + ["label", "cat"],
-                    )
+                bd = _append_split_cat_index(bd, split, cat)
+                bi = _append_split_cat_index(bi, split, cat)
                 base_desc_parts.append(bd)
                 base_dist_parts.append(bi.drop("observed", axis=1))
 
@@ -527,10 +556,7 @@ class Evaluator:
                 base_struct = _observed_base_structural(
                     sub_target, self._jobs.structural
                 )
-                base_struct.index = MultiIndex.from_tuples(
-                    [(*i, split, cat) for i in base_struct.index],
-                    names=list(base_struct.index.names) + ["label", "cat"],
-                )
+                base_struct = _append_split_cat_index(base_struct, split, cat)
                 base_desc_parts.append(base_struct)
                 base_dist_parts.append(base_struct.drop("observed", axis=1))
 
@@ -538,10 +564,7 @@ class Evaluator:
                 key = (spec.domain, spec.name)
                 obs_feat = cached_subset[key]
                 base, _ = _observed_base(spec, obs_feat)
-                base.index = MultiIndex.from_tuples(
-                    [(spec.domain, spec.name, f, split, cat) for f in base.index],
-                    names=["domain", "feature", "segment", "label", "cat"],
-                )
+                base = _tag_density_index(base, spec.domain, spec.name, split, cat)
                 base_desc_parts.append(base.assign(unit=spec.description_name))
                 base_dist_parts.append(
                     base[["observed__weight"]].assign(unit=spec.distance_name)
@@ -555,7 +578,7 @@ class Evaluator:
             splits_bar.close()
 
         # _base_desc / _base_dist are the "observed" half of the wide DataFrames
-        # that compare_splits will build by concatenating model columns alongside.
+        # that compare_population will build by concatenating model columns alongside.
         self._base_desc = concat(base_desc_parts)
         self._base_dist = concat(base_dist_parts)
         self.collected_descriptions: dict[str, DataFrame] = {}
@@ -570,6 +593,10 @@ class Evaluator:
     ) -> "EvalResult":
         """Compare synthetic populations against pre-computed target features.
 
+        This is the primary entry point for running multiple synthetic
+        comparisons against the same observed data (splits, if any, are
+        configured once via the constructor).
+
         Args:
             synthetic: ``{model_name: schedules_df}``.
             attributes: Optional ``{model_name: attributes_df}`` with ``pid``
@@ -578,7 +605,7 @@ class Evaluator:
             verbose: Print progress for each (split, category) subset.
         """
         if attributes is not None:
-            return self.compare_populations(
+            return self._compare_populations(
                 synthetic_schedules=synthetic,
                 synthetic_attributes=attributes,
                 verbose=verbose,
@@ -588,34 +615,45 @@ class Evaluator:
             m: DataFrame({"pid": df["pid"].unique(), "__split__": "all"})
             for m, df in synthetic.items()
         }
-        return self.compare_populations(
+        return self._compare_populations(
             synthetic_schedules=synthetic,
             synthetic_attributes=synth_attrs,
             verbose=verbose,
         )
 
-    def compare_populations(
+    def _compare_populations(
         self,
         synthetic_schedules: dict[str, DataFrame],
         synthetic_attributes: dict[str, DataFrame] | None = None,
         verbose: bool = False,
     ) -> "EvalResult":
-        """Compare synthetic populations against target, split by attribute categories.
-
-        Convenience wrapper: resets state, calls ``compare_population`` for each
-        model, then returns ``report()``.
-
-        Args:
-            synthetic_schedules: ``{model_name: schedules_df}``.
-            synthetic_attributes: Optional ``{model_name: attributes_df}`` with ``pid``
-                column.  If omitted, no attribute-based splitting is applied.
-            verbose: Print progress.
-
-        Returns:
-            EvalResult wrapping raw segment-level data.
-        """
+        """Shared implementation behind ``Evaluator.compare``."""
         self.collected_descriptions = {}
         self.collected_distances = {}
+
+        uses_real_splits = self._split_on != ["__split__"]
+        if uses_real_splits:
+            if synthetic_attributes is None:
+                raise ValueError(
+                    "attributes is required for every model when the Evaluator "
+                    "was initialised with splits; missing for: "
+                    f"{sorted(synthetic_schedules)}"
+                )
+            invalid: dict[str, str] = {}
+            for model in synthetic_schedules:
+                attrs = synthetic_attributes.get(model)
+                if attrs is None:
+                    invalid[model] = "no attributes provided"
+                    continue
+                missing_cols = [c for c in self._split_on if c not in attrs.columns]
+                if missing_cols:
+                    invalid[model] = f"missing split column(s) {missing_cols}"
+            if invalid:
+                details = "; ".join(f"'{m}' ({why})" for m, why in invalid.items())
+                raise ValueError(
+                    "attributes with all split_on columns is required for every "
+                    f"model when the Evaluator was initialised with splits: {details}"
+                )
 
         if not self._progress:
             if not self._precomputed:
@@ -665,15 +703,17 @@ class Evaluator:
                 if synthetic_attributes is not None
                 else None
             )
+            self._active_feature_bar = bars[bar_idx]
+            self._active_splits_bar = bars[bar_idx + 1]
             self.compare_population(
                 model=model,
                 schedule=schedule,
                 attributes=attrs,
                 verbose=verbose,
-                feature_bar=bars[bar_idx],
-                splits_bar=bars[bar_idx + 1],
             )
             bar_idx += 2
+        self._active_feature_bar = None
+        self._active_splits_bar = None
 
         for bar in bars:
             bar.close()
@@ -686,15 +726,15 @@ class Evaluator:
         schedule: DataFrame,
         attributes: DataFrame | None = None,
         verbose: bool = False,
-        *,
-        feature_bar=None,
-        splits_bar=None,
     ) -> None:
         """Compute description and distance columns for a single synthetic population.
 
-        Results are stored on ``self._population_descs[model]`` and
-        ``self._population_dists[model]``.  Call ``report()`` after all models
-        have been compared to assemble the final ``EvalResult``.
+        Advanced/low-level: for one-model-at-a-time accumulation. Most users
+        want ``compare()`` or ``Evaluator.compare()``.
+
+        Results are stored on ``self.collected_descriptions[model]`` and
+        ``self.collected_distances[model]``.  Call ``report()`` after all
+        models have been compared to assemble the final ``EvalResult``.
 
         Args:
             model: Model name.
@@ -707,6 +747,8 @@ class Evaluator:
         if not self._precomputed:
             self._precompute_target()
 
+        feature_bar = self._active_feature_bar
+        splits_bar = self._active_splits_bar
         schedule = _coerce_to_pandas(schedule)
         if attributes is not None:
             attributes = _coerce_to_pandas(attributes)
@@ -758,7 +800,7 @@ class Evaluator:
             self._jobs.creativity.enabled or self._jobs.structural.needs_novel_pids
         )
         if _needs_hashes:
-            pid_hashes = creativity.hash_per_pid(schedule)
+            pid_hashes = creativity.hash_per_pid(pop)
         if self._jobs.structural.enabled:
             feasibility_flags = structural.feasibility(pop)
 
@@ -788,11 +830,8 @@ class Evaluator:
                     self._obs_hashes[(split, cat)],
                     self._jobs.creativity,
                 )
-                for df in (c_desc, c_dist):
-                    df.index = MultiIndex.from_tuples(
-                        [(*i, split, cat) for i in df.index],
-                        names=list(df.index.names) + ["label", "cat"],
-                    )
+                c_desc = _append_split_cat_index(c_desc, split, cat)
+                c_dist = _append_split_cat_index(c_dist, split, cat)
                 description_parts.append(c_desc)
                 distance_parts.append(c_dist)
 
@@ -812,11 +851,7 @@ class Evaluator:
                     self._jobs.structural,
                 )
                 for parts in (description_parts, distance_parts):
-                    tagged = s_cols.copy()
-                    tagged.index = MultiIndex.from_tuples(
-                        [(*i, split, cat) for i in tagged.index],
-                        names=list(tagged.index.names) + ["label", "cat"],
-                    )
+                    tagged = _append_split_cat_index(s_cols.copy(), split, cat)
                     parts.append(tagged)
 
             for spec in self._jobs.density:
@@ -850,13 +885,11 @@ class Evaluator:
                 dist_part = DataFrame(
                     {f"{model}__weight": w.reindex(s.index, fill_value=0), model: s}
                 )
-                desc_part.index = MultiIndex.from_tuples(
-                    [(spec.domain, spec.name, f, split, cat) for f in desc_part.index],
-                    names=["domain", "feature", "segment", "label", "cat"],
+                desc_part = _tag_density_index(
+                    desc_part, spec.domain, spec.name, split, cat
                 )
-                dist_part.index = MultiIndex.from_tuples(
-                    [(spec.domain, spec.name, f, split, cat) for f in dist_part.index],
-                    names=["domain", "feature", "segment", "label", "cat"],
+                dist_part = _tag_density_index(
+                    dist_part, spec.domain, spec.name, split, cat
                 )
                 description_parts.append(desc_part)
                 distance_parts.append(dist_part)
@@ -868,7 +901,7 @@ class Evaluator:
         if _own_splits_bar:
             splits_bar.close()
 
-        # Store results so compare_splits can later concat them with _base_desc/dist.
+        # Store results so report() can later concat them with _base_desc/dist.
         self.collected_descriptions[model] = concat(
             [p for p in description_parts if not p.empty]
         )
@@ -882,9 +915,10 @@ class Evaluator:
         Call this after one or more ``compare_population`` calls.
 
         Returns:
-            EvalResult wrapping the raw segment-level data.  Call
-            ``result.aggregate()`` or access named properties to get the
-            three-tier aggregated output.
+            EvalResult wrapping the raw segment-level data.  Use
+            ``result.at(level, split)`` or the named properties
+            (``.features``/``.groups``/``.domains``) to get the three-tier
+            aggregated output.
         """
         descriptions = concat(
             [self._base_desc] + list(self.collected_descriptions.values()), axis=1
@@ -899,55 +933,49 @@ def compare(
     observed: DataFrame,
     synthetic,
     attributes: dict[str, DataFrame] | None = None,
+    target_attributes: DataFrame | None = None,
+    split_on: list[str] | None = None,
     verbose: bool = False,
+    disable: list[str] | None = None,
+    progress: bool = False,
 ) -> EvalResult:
     """Compare observed and synthetic activity schedule populations.
+
+    This is the primary entry point, for both one-off and split-based
+    comparisons. For repeated comparisons against the same observed data,
+    use ``Evaluator`` directly so observed features are computed once.
 
     Args:
         observed: Observed schedules with columns pid, act, start, end, duration.
         synthetic: Single synthetic DataFrame or dict mapping model names to DataFrames.
         attributes: Optional ``{model_name: attributes_df}`` with ``pid`` column.
             If provided, enables attribute-based splitting (exposes ``label_*`` frames).
+        target_attributes: Optional attributes DataFrame for ``observed``, with a
+            ``pid`` column.  Required together with ``split_on``.
+        split_on: Optional attribute column(s) to split evaluation by (e.g.
+            ``["gender"]``).  Requires ``target_attributes`` and ``attributes``.
         verbose: Print progress for each (split, category) subset.
+        disable: Optional dotted ``section.key`` config paths to switch off,
+            e.g. ``["jobs.creativity.novelty", "jobs.transitions.4-gram"]`` —
+            see ``config.toml`` for the full list of keys. Sugar for the common
+            case of disabling one or two metrics without writing a config file;
+            pass ``config_path``/``jobs`` via ``Evaluator`` directly for
+            anything more involved.
+        progress: Show tqdm progress bars while computing features. Useful for
+            large populations; pass ``Evaluator(progress=True)`` directly
+            instead if you're also making repeated ``compare()`` calls.
 
     Returns:
-        EvalResult with raw segment-level data; use ``aggregate()`` or named
-        properties for the three-tier output.
+        EvalResult with raw segment-level data; use ``result.at(...)`` or the
+        named properties for the aggregated output.
     """
     if _is_dataframe(synthetic):
         synthetic = {"synthetic": synthetic}
-    return Evaluator(observed).compare(
-        synthetic, attributes=attributes, verbose=verbose
+    evaluator = Evaluator(
+        observed,
+        target_attributes=target_attributes,
+        split_on=split_on,
+        disable=disable,
+        progress=progress,
     )
-
-
-def compare_splits(
-    observed: DataFrame,
-    synthetic_schedules: dict[str, DataFrame],
-    synthetic_attributes: dict[str, DataFrame],
-    target_attributes: DataFrame,
-    split_on: list[str],
-    verbose: bool = False,
-) -> EvalResult:
-    """Compare observed and synthetic populations, split by attribute categories.
-
-    Convenience wrapper around ``Evaluator.compare_populations``.
-
-    Args:
-        observed: Observed schedules with columns pid, act, start, end, duration.
-        synthetic_schedules: ``{model_name: schedules_df}``.
-        synthetic_attributes: ``{model_name: attributes_df}`` with ``pid`` column.
-        target_attributes: Target attributes DataFrame with ``pid`` column.
-        split_on: Attribute columns to split on.
-        verbose: Print progress.
-
-    Returns:
-        EvalResult with raw segment-level data; includes ``label_*`` frames
-        when real attribute splits are present.
-    """
-    evaluator = Evaluator(observed, target_attributes, split_on)
-    return evaluator.compare_populations(
-        synthetic_schedules=synthetic_schedules,
-        synthetic_attributes=synthetic_attributes,
-        verbose=verbose,
-    )
+    return evaluator.compare(synthetic, attributes=attributes, verbose=verbose)

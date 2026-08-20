@@ -9,6 +9,7 @@ dependencies = [
     "scipy",
     "pot",
     "matplotlib",
+    "seaborn",
     "tabulate",
     "tomli>=1.1.0; python_version < '3.11'",
     "tslearn",
@@ -22,8 +23,6 @@ dev-dependencies = [
     "pytest-benchmark",
     "ruff",
     "black",
-    "matplotlib>=3.7.5",
-    "seaborn>=0.13.2",
     "polars>=1.8.2",
 ]
 

@@ -7,7 +7,7 @@ import pandas as pd
 
 from acteval._report import print_markdown
 from acteval.evaluate import Evaluator
-from acteval.features.structural import _get_consecutives, feasibility
+from acteval.features.structural import feasibility, get_consecutives
 from acteval.population import Population
 
 _REQUIRED_SCHEDULE_COLS = {"pid", "act"}
@@ -90,6 +90,25 @@ def _validate_attrs(df: pd.DataFrame, path: str, split_on: list | None = None) -
         missing = [c for c in split_on if c not in df.columns]
         if missing:
             sys.exit(f"{path}: missing split-on columns {missing}")
+
+
+def _check_attrs_consistency(
+    model_attrs: dict[str, bool], required: bool, context: str = ""
+) -> None:
+    """Exit with an error if attrs are required but missing for some models.
+
+    Attributes must be provided for all models or none; this enforces that
+    once `required` is True (i.e. attributes are needed somewhere — target
+    attrs were given, or split-on is in effect).
+    """
+    if not required:
+        return
+    missing = [name for name, has_attrs in model_attrs.items() if not has_attrs]
+    if missing:
+        sys.exit(
+            f"{context}attributes must be provided for all models or none; "
+            f"missing for: {missing}"
+        )
 
 
 def _classify_file(path: str) -> str:
@@ -198,14 +217,8 @@ def _discover_batch(
             attrs_path = str(attr_files[0]) if attr_files else None
             results[subdir.name][1] = attrs_path
 
-        # check for consistency in attrs presence across models
-        has_attrs_flags = [r[1] is not None for r in results.values()]
-        if not all(has_attrs_flags):
-            missing = [n for n, r in results.items() if r[1] is None]
-            sys.exit(
-                f"--batch: missing attributes — some model directories require "
-                f"attributes files; missing for: {missing}"
-            )
+        model_attrs = {name: (r[1] is not None) for name, r in results.items()}
+        _check_attrs_consistency(model_attrs, required=True, context="--batch: ")
 
     print(f"Discovered {len(results)} model(s) from {batch_dir!r}:")
     for name, (sched, attrs) in results.items():
@@ -223,52 +236,97 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="acteval",
         description="Compare synthetic activity schedules against observed data.",
     )
-    p.add_argument("target", help="Path to observed schedules (CSV or Parquet)")
-    p.add_argument(
-        "target_attrs",
-        nargs="?",
-        default=None,
-        help="Optional path to target population attributes (CSV or Parquet)",
+    sub = p.add_subparsers(dest="command", required=True)
+
+    compare = sub.add_parser(
+        "compare", help="Compare synthetic schedules against observed data."
     )
-    p.add_argument(
+    compare.add_argument("target", help="Path to observed schedules (CSV or Parquet)")
+    compare.add_argument(
+        "--target-attrs",
+        "-a",
+        dest="target_attrs",
+        metavar="PATH",
+        default=None,
+        help="Path to target population attributes (CSV or Parquet); required with --split-on",
+    )
+    compare.add_argument(
         "--model",
         "-m",
         nargs="+",
         action="append",
         help="Synthetic model: NAME SCHEDULE_PATH [ATTRS_PATH] (repeatable)",
     )
-    p.add_argument(
+    compare.add_argument(
         "--split-on",
         "-s",
         nargs="+",
         action="extend",
-        help="Attribute columns to split evaluation on (requires TARGET_ATTRS and per-model attrs)",
+        help="Attribute columns to split evaluation on (requires --target-attrs and per-model attrs)",
     )
-    p.add_argument("--config", "-c", metavar="PATH", help="Path to custom config.toml")
-    p.add_argument(
+    compare.add_argument(
+        "--config", "-c", metavar="PATH", help="Path to custom config.toml"
+    )
+    compare.add_argument(
+        "--disable",
+        nargs="+",
+        action="extend",
+        metavar="KEY",
+        help="Dotted config keys to disable, e.g. jobs.creativity.novelty",
+    )
+    compare.add_argument(
         "--level",
         "-l",
         choices=["domains", "groups", "features"],
         default="domains",
         help="Aggregation level to display (default: domains)",
     )
-    p.add_argument(
+    compare.add_argument(
         "--output", "-o", metavar="OUTPUT_DIR", help="Directory to save CSV results"
     )
-    p.add_argument(
+    compare.add_argument(
         "--verbose", "-v", action="store_true", help="Print all aggregation levels"
     )
-    p.add_argument(
+    compare.add_argument(
         "--batch",
         "-b",
         metavar="BATCH_DIR",
         help="Directory of model subdirs; schedule and attrs auto-discovered per subdir",
     )
-    p.add_argument(
+    compare.add_argument(
         "--no-progress",
         action="store_true",
         help="Disable progress bars",
     )
+
+    filter_p = sub.add_parser(
+        "filter", help="Filter input schedules for structural issues."
+    )
+    filter_sub = filter_p.add_subparsers(dest="filter_command", required=True)
+
+    nhb = filter_sub.add_parser(
+        "non-home-based",
+        help="Return schedules that do not start and end at home.",
+    )
+    nhb.add_argument("input", help="Path to input schedules (CSV or Parquet)")
+    nhb.add_argument("--output", "-o", metavar="FILE", help="Path to save filtered CSV")
+
+    cons = filter_sub.add_parser(
+        "consecutive",
+        help="Return schedules with consecutive duplicate activities.",
+    )
+    cons.add_argument("input", help="Path to input schedules (CSV or Parquet)")
+    cons.add_argument(
+        "--act",
+        nargs="+",
+        default=["home", "work", "education"],
+        metavar="ACT",
+        help="Activities to check for consecutive duplicates (default: home work education)",
+    )
+    cons.add_argument(
+        "--output", "-o", metavar="FILE", help="Path to save filtered CSV"
+    )
+
     return p
 
 
@@ -286,7 +344,7 @@ def _run(args: argparse.Namespace) -> None:
 
     # --- split-on requires attrs (and vice versa) ---
     if bool(args.split_on) and not bool(args.target_attrs):
-        sys.exit("--split-on required TARGET_ATTRS be specified")
+        sys.exit("--split-on requires --target-attrs to be specified")
 
     # --- load target attributes ---
     target_attributes: pd.DataFrame | None = None
@@ -346,14 +404,10 @@ def _run(args: argparse.Namespace) -> None:
         if not has_target_attrs:
             sys.exit(
                 "target attributes must be provided when model attributes are given; "
-                "pass TARGET_ATTRS as the second positional argument"
+                "pass --target-attrs PATH"
             )
-        missing_model_attrs = [n for n in synthetic if n not in all_attrs_paths]
-        if missing_model_attrs:
-            sys.exit(
-                f"attributes must be provided for all models or none; "
-                f"missing for: {missing_model_attrs}"
-            )
+        model_attrs = {name: (name in all_attrs_paths) for name in synthetic}
+        _check_attrs_consistency(model_attrs, required=True)
 
     # --- evaluate ---
     print(f"acteval — comparing {len(synthetic)} model(s) to {args.target}\n")
@@ -363,6 +417,7 @@ def _run(args: argparse.Namespace) -> None:
         split_on=args.split_on,
         config_path=args.config,
         progress=not args.no_progress,
+        disable=args.disable,
     )
     # Attrs are only meaningful for splitting; don't pass them when split_on is absent
     attrs_for_evaluator = attributes if args.split_on else None
@@ -410,40 +465,6 @@ def _run(args: argparse.Namespace) -> None:
         print(f"\nResults saved to {args.output}")
 
 
-def _build_filter_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="acteval filter",
-        description="Filter input schedules for structural issues.",
-    )
-    sub = p.add_subparsers(dest="filter_command")
-    sub.required = True
-
-    nhb = sub.add_parser(
-        "non-home-based",
-        help="Return schedules that do not start and end at home.",
-    )
-    nhb.add_argument("input", help="Path to input schedules (CSV or Parquet)")
-    nhb.add_argument("--output", "-o", metavar="FILE", help="Path to save filtered CSV")
-
-    cons = sub.add_parser(
-        "consecutive",
-        help="Return schedules with consecutive duplicate activities.",
-    )
-    cons.add_argument("input", help="Path to input schedules (CSV or Parquet)")
-    cons.add_argument(
-        "--act",
-        nargs="+",
-        default=["home", "work", "education"],
-        metavar="ACT",
-        help="Activities to check for consecutive duplicates (default: home work education)",
-    )
-    cons.add_argument(
-        "--output", "-o", metavar="FILE", help="Path to save filtered CSV"
-    )
-
-    return p
-
-
 def _filter_and_output(
     df: pd.DataFrame, mask: np.ndarray, population: Population, output: str | None
 ) -> None:
@@ -478,23 +499,16 @@ def _run_filter_consecutive(args: argparse.Namespace) -> None:
     unique_pids = np.arange(population.n)
     mask = np.zeros(population.n, dtype=bool)
     for act in args.act:
-        mask |= _get_consecutives(population.pids, population.acts, unique_pids, act)
+        mask |= get_consecutives(population.pids, population.acts, unique_pids, act)
     _filter_and_output(df, mask, population, args.output)
 
 
-def _run_filter_cmd(argv: list[str]) -> None:
-    parser = _build_filter_parser()
-    args = parser.parse_args(argv)
-    if args.filter_command == "non-home-based":
+def main() -> None:
+    parser = _build_parser()
+    args = parser.parse_args()
+    if args.command == "compare":
+        _run(args)
+    elif args.filter_command == "non-home-based":
         _run_filter_non_home_based(args)
     else:
         _run_filter_consecutive(args)
-
-
-def main() -> None:
-    if len(sys.argv) > 1 and sys.argv[1] == "filter":
-        _run_filter_cmd(sys.argv[2:])
-    else:
-        parser = _build_parser()
-        args = parser.parse_args()
-        _run(args)

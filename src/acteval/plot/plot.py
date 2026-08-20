@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from acteval.describe.utils import _to_population
+from acteval.plot.utils import _to_population
 from acteval.population import Population
 
 _DEFAULT_PALETTE = [

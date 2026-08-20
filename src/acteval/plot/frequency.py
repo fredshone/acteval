@@ -6,7 +6,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.patches import Patch
 
-from acteval.describe.utils import _to_population
+from acteval.plot.utils import _to_population
 from acteval.features.frequency import binned_activity_density
 
 
@@ -14,8 +14,12 @@ def frequency_plots(observed, ys: Optional[dict], **kwargs):
     if ys is None:
         ys = dict()
     pop_obs = _to_population(observed)
-    act_order = np.argsort(pop_obs.act_count_matrix.sum(0))[::-1]
-    acts = [pop_obs.unique_acts[i] for i in act_order]
+
+    if not kwargs.get("acts"):
+        act_order = np.argsort(pop_obs.act_count_matrix.sum(0))[::-1]
+        acts = [pop_obs.unique_acts[i] for i in act_order]
+    else:
+        acts = kwargs.pop("acts")
     class_map = {n: i for i, n in enumerate(acts)}
 
     n_plots = len(ys) + 2

@@ -7,13 +7,30 @@ from acteval._aggregation import (
     distances_to_domain_level,
     distances_to_group_level,
 )
-from acteval._pipeline import describe
+from acteval._pipeline import _aggregate_features
 from acteval.features._utils import equals
 from acteval.features.structural import (
     feasibility_eval,
     time_consistency,
 )
 from acteval.population import Population
+
+
+def _describe(descriptions, distances):
+    """Three-tier aggregation, mirroring what evaluate.py assembles internally."""
+    feat_desc, feat_dist = _aggregate_features(descriptions, distances)
+    group_desc = descriptions_to_group_level(descriptions)
+    group_dist = distances_to_group_level(distances)
+    domain_desc = descriptions_to_domain_level(group_desc)
+    domain_dist = distances_to_domain_level(group_dist)
+    return {
+        "descriptions": feat_desc,
+        "distances": feat_dist,
+        "group_descriptions": group_desc,
+        "group_distances": group_dist,
+        "domain_descriptions": domain_desc,
+        "domain_distances": domain_dist,
+    }
 
 
 def test_time_consistency():
@@ -109,7 +126,7 @@ def test_describe_structural():
     )
     metrics = concat([observed_weights, observed_metrics, weights, metrics], axis=1)
     metrics["unit"] = "prob. invalid"
-    frames = describe(metrics, metrics)
+    frames = _describe(metrics, metrics)
     assert len(frames["descriptions"]) == 8
     assert len(frames["group_descriptions"]) == 3
     assert len(frames["domain_descriptions"]) == 1
@@ -148,7 +165,7 @@ def test_describe_splits_structural():
     metrics = Series([1 / 3, 0] * 8, index=index, name="y")
     metrics = concat([observed_weights, observed_metrics, weights, metrics], axis=1)
     metrics["unit"] = "prob. invalid"
-    frames = describe(metrics, metrics)
+    frames = _describe(metrics, metrics)
     assert len(frames["descriptions"]) == 8
     assert len(frames["group_descriptions"]) == 3
     assert len(frames["domain_descriptions"]) == 1

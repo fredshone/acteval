@@ -3,7 +3,20 @@
 import pandas as pd
 import pytest
 
-from acteval.cli import _run_filter_cmd
+from acteval.cli import (
+    _build_parser,
+    _run_filter_consecutive,
+    _run_filter_non_home_based,
+)
+
+
+def _run_filter_cmd(argv: list[str]) -> None:
+    """Parse and dispatch a `filter ...` invocation, mirroring cli.main()."""
+    args = _build_parser().parse_args(["filter", *argv])
+    if args.filter_command == "non-home-based":
+        _run_filter_non_home_based(args)
+    else:
+        _run_filter_consecutive(args)
 
 
 _HOME_BASED = [
@@ -36,7 +49,13 @@ _CONSEC_SHOP = [
     {"pid": 4, "act": "home", "start": 16, "end": 24, "duration": 8},
 ]
 
-_ALL_ROWS = _HOME_BASED + _NOT_HOME_BASED_STARTS + _NOT_HOME_BASED_ENDS + _CONSEC_HOME + _CONSEC_SHOP
+_ALL_ROWS = (
+    _HOME_BASED
+    + _NOT_HOME_BASED_STARTS
+    + _NOT_HOME_BASED_ENDS
+    + _CONSEC_HOME
+    + _CONSEC_SHOP
+)
 
 
 @pytest.fixture
@@ -49,13 +68,16 @@ def schedule_csv(tmp_path):
 @pytest.fixture
 def empty_csv(tmp_path):
     p = tmp_path / "empty.csv"
-    pd.DataFrame(columns=["pid", "act", "start", "end", "duration"]).to_csv(p, index=False)
+    pd.DataFrame(columns=["pid", "act", "start", "end", "duration"]).to_csv(
+        p, index=False
+    )
     return str(p)
 
 
 # ---------------------------------------------------------------------------
 # non-home-based
 # ---------------------------------------------------------------------------
+
 
 def test_filter_non_home_based_stdout(schedule_csv, capsys):
     _run_filter_cmd(["non-home-based", schedule_csv])
@@ -82,7 +104,9 @@ def test_filter_non_home_based_empty(empty_csv, capsys):
 
 def test_filter_non_home_based_missing_act_col(tmp_path):
     p = tmp_path / "no_act.csv"
-    pd.DataFrame({"pid": [0], "start": [0], "end": [10], "duration": [10]}).to_csv(p, index=False)
+    pd.DataFrame({"pid": [0], "start": [0], "end": [10], "duration": [10]}).to_csv(
+        p, index=False
+    )
     with pytest.raises(SystemExit):
         _run_filter_cmd(["non-home-based", str(p)])
 
@@ -90,6 +114,7 @@ def test_filter_non_home_based_missing_act_col(tmp_path):
 # ---------------------------------------------------------------------------
 # consecutive
 # ---------------------------------------------------------------------------
+
 
 def test_filter_consecutive_defaults(schedule_csv, capsys):
     _run_filter_cmd(["consecutive", schedule_csv])
@@ -129,6 +154,8 @@ def test_filter_consecutive_to_file(schedule_csv, tmp_path):
 
 def test_filter_consecutive_missing_act_col(tmp_path):
     p = tmp_path / "no_act.csv"
-    pd.DataFrame({"pid": [0], "start": [0], "end": [10], "duration": [10]}).to_csv(p, index=False)
+    pd.DataFrame({"pid": [0], "start": [0], "end": [10], "duration": [10]}).to_csv(
+        p, index=False
+    )
     with pytest.raises(SystemExit):
         _run_filter_cmd(["consecutive", str(p)])

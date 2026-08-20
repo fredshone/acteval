@@ -16,8 +16,8 @@ import ot
 import pandas as pd
 import seaborn as sns
 
-from acteval import Population, compare, compare_splits
-from acteval.describe.plot import (
+from acteval import compare
+from acteval.plot.plot import (
     _POPULATION_PALETTE,
     _save,
     _subplots,
@@ -27,10 +27,11 @@ from acteval.describe.plot import (
     sequence_lengths,
     timeuse,
 )
-from acteval.describe.results import groups, heatmap
-from acteval.describe.utils import PopulationGenerator
+from acteval.plot.results import groups, heatmap
+from acteval.plot.utils import PopulationGenerator
 from acteval.features.participation import sequence_lengths as sequence_lengths_feature
-from acteval.features.times import start_times_by_act_plan_enum_per_pid
+from acteval.features.times import start_times_by_act_plan_enum
+from acteval.population import Population
 
 ACT_COLORS = {
     "home": "#5b8dd9",
@@ -165,10 +166,10 @@ def emd(
     pop_labels = list(populations.keys())
     obs_label, model_label = pop_labels[0], pop_labels[1]
 
-    obs_agg = start_times_by_act_plan_enum_per_pid(
+    obs_agg = start_times_by_act_plan_enum(
         Population(populations[obs_label])
     ).aggregate()
-    model_agg = start_times_by_act_plan_enum_per_pid(
+    model_agg = start_times_by_act_plan_enum(
         Population(populations[model_label])
     ).aggregate()
 
@@ -275,37 +276,22 @@ def splits(
         }
     )
 
-    result = compare_splits(
-        observed=observed_df,
-        synthetic_schedules={model_label: synthetic_df},
-        synthetic_attributes={model_label: synthetic_attrs},
+    result = compare(
+        observed_df,
+        {model_label: synthetic_df},
+        attributes={model_label: synthetic_attrs},
         target_attributes=target_attrs,
         split_on=["work_status"],
-        report_stats=False,
     )
 
-    ld = result.label_domain_distances
-    if ld is None:
-        print("  label_domain_distances not available — skipping fig10")
-        return
-
-    ld_reset = ld.reset_index()
-
-    if "label" in ld_reset.columns and "cat" in ld_reset.columns:
-        ws = ld_reset[ld_reset["label"] == "work_status"].copy()
-    else:
-        ws = ld_reset.copy()
+    dist = result.at("domains", "by_category").distances
+    ws = dist.xs("work_status", level="label").reset_index()
 
     if ws.empty:
         print("  no work_status rows found — skipping fig10")
         return
 
-    if "domain" not in ws.columns:
-        print("  unexpected index structure — skipping fig10")
-        return
-
-    cat_col = "cat" if "cat" in ws.columns else ws.columns[1]
-    categories = ws[cat_col].unique()
+    categories = ws["cat"].unique()
     domains = ws["domain"].unique()
     x = np.arange(len(domains))
     width = 0.35
@@ -313,7 +299,7 @@ def splits(
 
     fig, ax = _subplots(figsize=(9, 4))
     for i, cat in enumerate(sorted(categories)):
-        subset = ws[ws[cat_col] == cat].set_index("domain")
+        subset = ws[ws["cat"] == cat].set_index("domain")
         vals = [
             subset.loc[d, model_label] if d in subset.index else 0.0 for d in domains
         ]
@@ -373,12 +359,15 @@ def main():
 
     A = education_leaning(1000)
     B = leisure_dominant(1000)
-    C = urban_workers(1000)
+    observed_pop = urban_workers(1000)
 
     populations = {
         "Population A": A,
-        # "Population B": B,
-        # "Population C": C,
+        "Population B": B,
+    }
+    obs_vs_a = {
+        "Observed": observed_pop,
+        "Population A": A,
     }
 
     gantt(
@@ -389,7 +378,7 @@ def main():
         acts=ACTS,
     )
 
-    pop = Population(urban_workers(1000))
+    pop = Population(observed_pop)
     print(pop.act_count_matrix[-3:])
     print(pop.int_to_act)
 
@@ -418,9 +407,8 @@ def main():
     print("\nRunning compare()...")
 
     result = compare(
-        observed=A,
+        observed=observed_pop,
         synthetic=populations,
-        report_stats=False,
     )
     print(result)
 
@@ -446,12 +434,12 @@ def main():
         name="fig5-bigrams.svg",
         output_dir=output_dir,
     )
-    starttimes(populations=populations, output_dir=output_dir)
-    joint(populations=populations, output_dir=output_dir)
-    emd(populations=populations, output_dir=output_dir)
+    starttimes(populations=obs_vs_a, output_dir=output_dir)
+    joint(populations=obs_vs_a, output_dir=output_dir)
+    emd(populations=obs_vs_a, output_dir=output_dir)
     heatmap(result, name="fig8-heatmap.svg", output_dir=output_dir)
     groups(result, name="fig9-groups.svg", output_dir=output_dir)
-    splits(populations=populations, output_dir=output_dir)
+    splits(populations=obs_vs_a, output_dir=output_dir)
 
     print(f"\nDone. All plots written to {output_dir}/")
 

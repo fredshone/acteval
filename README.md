@@ -14,64 +14,6 @@ Or with [uv](https://github.com/astral-sh/uv):
 uv add acteval
 ```
 
-## CLI
-
-`acteval` ships with a command-line interface for comparing models without writing Python.
-
-```
-acteval TARGET [TARGET_ATTRS] -m NAME SCHEDULE [ATTRS] [-m ...] [options]
-```
-
-```bash
-# Compare one model to observed data
-acteval observed.csv -m my_model synthetic.csv
-
-# Compare multiple models side-by-side
-acteval observed.csv -m model_a synthetic_a.csv -m model_b synthetic_b.csv
-
-# Save results to CSV files
-acteval observed.csv -m my_model synthetic.csv -o results/
-
-# Show group-level detail instead of domain summary
-acteval observed.csv -m my_model synthetic.csv -l groups
-
-# Split evaluation by attribute (e.g. gender)
-# TARGET_ATTRS is the second positional; per-model attrs are the third argument to -m
-# Attributes must be provided for the target and ALL models, or not at all
-acteval observed.csv target_attrs.csv \
-  -m model_a synthetic_a.csv synth_attrs_a.csv \
-  -m model_b synthetic_b.csv synth_attrs_b.csv \
-  --split-on gender
-
-# Batch mode: auto-discover model subdirectories
-# Each subdir becomes a model (name = dir name); schedule and attrs files are
-# classified by their columns (pid + act → schedule; pid + other cols → attrs)
-acteval observed.csv --batch models/
-
-# Batch mode with attribute splitting
-acteval observed.csv target_attrs.csv --batch models/ --split-on gender
-
-# Use a custom config file
-acteval observed.csv -m my_model synthetic.csv -c custom.toml
-```
-
-Input files can be CSV or Parquet (detected by extension). Run `acteval --help` for the full option list.
-
-**Attribute rules:**
-- Attributes must be provided for **all** inputs (target + every model) or **none**. Partial specification raises an error.
-- `--split-on` and `TARGET_ATTRS` must be specified together.
-- In batch mode, if any model subdirectory contains an attributes file, all subdirectories must contain one.
-
-**Batch directory layout:**
-```
-models/
-  model_a/
-    schedules.csv      ← has pid, act → classified as schedule
-    attributes.csv     ← has pid + other cols, no act → classified as attrs
-  model_b/
-    output.parquet
-```
-
 ## Quick start
 
 ```python
@@ -98,18 +40,26 @@ synthetic = pd.DataFrame([
     {"pid": 2, "act": "home", "start": 8, "end": 24, "duration": 16},
 ])
 
-result = compare(observed, {"my_model": synthetic})
+result = compare(observed, synthetic)
 print(result.summary())
+#                 synthetic
+# domain
 # creativity      0.166667
-# feasibility     0.500000
+# feasibility     0.333333
 # participations  0.162037
 # timing          0.082728
 # transitions     0.380952
 ```
 
+`synthetic` can also be a `{name: DataFrame}` dict to compare several models side-by-side in one call — see [Comparing populations](#comparing-populations).
+
+`result` is an `EvalResult`. See [Reading the results](#reading-the-results) for how to dig deeper — the fast path is `summary()` / `rank_models()` / `best_model`; `result.at(...)` is the one accessor to remember for everything else.
+
+Prefer the command line? Jump to [CLI](#cli) — it wraps the same `compare()` call for CSV/Parquet files without writing Python.
+
 ## Input format
 
-Data is passed as a pandas DataFrame with one row per activity episode:
+Data is passed as a pandas (or [polars](https://pola.rs)) DataFrame with one row per activity episode, in the same shape as `observed`/`synthetic` above:
 
 | column | type | description |
 |--------|------|-------------|
@@ -119,40 +69,29 @@ Data is passed as a pandas DataFrame with one row per activity episode:
 | `end` | numeric | End time |
 | `duration` | numeric | Duration (`end - start`); can be omitted when both `start` and `end` are provided |
 
-Any two of `start`, `end`, and `duration` are sufficient — the third is derived automatically.
-
-
-```python
-import pandas as pd
-
-observed = pd.DataFrame([
-    {"pid": 0, "act": "home", "start": 0,  "end": 6,  "duration": 6},
-    {"pid": 0, "act": "work", "start": 6,  "end": 14, "duration": 8},
-    {"pid": 0, "act": "home", "start": 14, "end": 24, "duration": 10},
-    {"pid": 1, "act": "home", "start": 0,  "end": 10, "duration": 10},
-    {"pid": 1, "act": "work", "start": 10, "end": 24, "duration": 14},
-])
-```
+Any two of `start`, `end`, and `duration` are sufficient — the third is derived automatically. A polars DataFrame in the same shape works anywhere a pandas one does; it's converted internally.
 
 ## API
 
-### `compare(observed, synthetic, **kwargs)`
+### Comparing populations
 
-Compare one or more synthetic populations to an observed population.
+This is the primary workflow — comparing one or more synthetic populations against
+observed data. Start with `compare()`; reach for `Evaluator` only once you're
+calling it repeatedly against the same observed data.
+
+#### `compare(observed, synthetic, **kwargs)`
+
+`synthetic` can be a single DataFrame, as in Quick start (the result column is
+named `"synthetic"`), or a `{name: DataFrame}` dict to compare several models
+side-by-side in one call:
 
 ```python
-from acteval import compare
-
-# Single synthetic population
-result = compare(observed, synthetic)
-
-# Multiple models side-by-side
 result = compare(observed, {"model_a": synthetic_a, "model_b": synthetic_b})
 ```
 
 `result` is an `EvalResult` object. See [Reading the results](#reading-the-results) for how to access distances and descriptions at feature, group, and domain level.
 
-### `Evaluator`
+#### `Evaluator`
 
 Use `Evaluator` when comparing multiple synthetic populations against the same observed data — it computes and caches the observed features once. Each `compare()` call is independent.
 
@@ -165,9 +104,68 @@ result_v1 = evaluator.compare({"v1": synthetic_v1})
 result_v2 = evaluator.compare({"v2": synthetic_v2})
 ```
 
-### `pairwise_distances(schedules, specs=None)`
+For incremental accumulation — adding one model at a time, e.g. inside a loop with
+inspection between models — see `Evaluator.compare_population()` / `.report()` in
+the docstrings. Advanced; most users want `compare()` or `Evaluator.compare()`.
 
-Compute a single NxN distance matrix between individual schedules. Useful for clustering, outlier detection, or directly comparing a small batch of schedules.
+Pass `progress=True` to either `compare()` or `Evaluator(...)` to show tqdm
+progress bars while features are computed — useful for large populations.
+
+#### Splitting by attribute
+
+Pass `target_attributes` (for `observed`), `attributes` (per synthetic model), and `split_on` to evaluate separately within each category of an attribute (e.g. gender) instead of over the whole population — the Python equivalent of the CLI's `--split-on` flag:
+
+```python
+target_attrs = pd.DataFrame({"pid": [0, 1], "gender": ["M", "F"]})
+synthetic_attributes = {"my_model": pd.DataFrame({"pid": [0, 1], "gender": ["M", "F"]})}
+
+result = compare(
+    observed,
+    {"my_model": synthetic},
+    attributes=synthetic_attributes,
+    target_attributes=target_attrs,
+    split_on=["gender"],
+)
+```
+
+This makes the `by_attribute`/`by_category` splits available at every level via
+`result.at(level, split)` — see [Reading the results](#reading-the-results) for how
+to read them. Without `split_on`, both raise `SplitNotAvailableError`.
+
+> **Numeric split columns are auto-binned.** If a `split_on` column is numeric
+> (float, or an integer with more than 10 unique values), it's automatically
+> bucketed into up to 5 ordinal bins (`"lowest"`...`"highest"`) via `pd.qcut`,
+> with a `UserWarning` noting the bin edges chosen. Encode the column as a
+> categorical/string beforehand (e.g. your own age bands) to control the
+> buckets yourself and suppress the warning.
+
+#### Disabling specific metrics
+
+Pass `disable` with a list of dotted `section.key` paths matching `config.toml` to switch off individual metrics without writing a custom config file:
+
+```python
+result = compare(
+    observed,
+    {"my_model": synthetic},
+    disable=["jobs.creativity.novelty", "jobs.transitions.4-gram"],
+)
+```
+
+Call `list_disable_keys()` to see every valid dotted path up front, instead of
+reading `config.toml` or triggering the `ValueError` an unknown key raises (which
+also lists the valid paths). `disable` also works on `Evaluator(observed,
+disable=[...])` and the CLI's `--disable` flag; for anything more involved than a
+metric or two, pass a custom `config_path` or a pre-built `jobs` (`EvalConfig`)
+instead.
+
+### Other entry points
+
+`compare()`/`Evaluator` cover population-level evaluation — the thing most users
+want. These are separate, optional tools for other use cases.
+
+#### `pairwise_distances(schedules, specs=None)`
+
+Compute a single NxN distance matrix between individual schedules. Useful for clustering, outlier detection, or directly comparing a small batch of schedules — a standalone code path, independent of `compare()`/`Evaluator`/`config.toml`.
 
 ```python
 from acteval import pairwise_distances
@@ -175,77 +173,90 @@ from acteval import pairwise_distances
 result = pairwise_distances(schedules)
 result.matrix          # numpy array, shape (N, N)
 result.pids            # original pid values, length N
-
-# Get a labeled DataFrame with original pid values as index/columns
-df = result.to_dataframe()
-
-# Example: find the two most similar schedules
-import numpy as np
-dist = result.to_dataframe()
-dist.values[np.arange(len(dist)), np.arange(len(dist))] = np.inf
-i, j = np.unravel_index(dist.values.argmin(), dist.shape)
-print(f"Most similar: {dist.index[i]} and {dist.columns[j]}")
+df = result.to_dataframe()  # labeled DataFrame, original pid values as index/columns
 ```
 
 The result matrix is symmetric with zeros on the diagonal. All values are in **0–1**.
 
-#### Pluggable distance specs
+By default, three equal-weight semantic-distance specs are used (participations,
+transitions, timing via MAE). Pass a custom `specs` list to change the metrics or
+their relative weights, e.g. `pairwise_distances(schedules, specs=[chamfer_spec()])`.
+Each spec defines a `feature_fn` (extracts a `(N, ...)` array from the population)
+and a `distance_fn` (computes the `(N, N)` matrix); the final matrix is a weighted
+average across all active specs. See `acteval.pairwise` for the available factories —
+`default_pairwise_specs()`, `chamfer_spec(max_len, weight)`, `soft_dtw_spec(max_len, gamma, weight)`.
 
-By default, three equal-weight semantic-distance specs are used (participations, transitions, timing via MAE). Pass a custom `specs` list to change the metrics or their relative weights:
+`Population` is the internal numpy-precomputation layer `compare()`/`pairwise_distances()` are built on — most users never construct it directly; see its docstring (`acteval.population.Population`) if you need it.
 
-```python
-from acteval.pairwise import chamfer_spec, soft_dtw_spec, default_pairwise_specs
+#### `acteval.plot`
 
-# Chamfer distance on EOS-padded activity sequences
-result = pairwise_distances(schedules, specs=[chamfer_spec()])
-
-# Soft-DTW on EOS-padded activity sequences
-result = pairwise_distances(schedules, specs=[soft_dtw_spec(gamma=1.0)])
-
-# Mix metrics with custom weights
-result = pairwise_distances(schedules, specs=[
-    *default_pairwise_specs(),       # weight=1.0 each
-    chamfer_spec(weight=1.0),
-    soft_dtw_spec(weight=2.0),
-])
-```
-
-Each spec defines a `feature_fn` (extracts a `(N, ...)` array from the population) and a `distance_fn` (computes the `(N, N)` matrix). The final matrix is a weighted average across all active specs.
-
-| Factory | Description |
-|---------|-------------|
-| `default_pairwise_specs()` | MAE on participation counts, bi-gram counts, mean durations |
-| `chamfer_spec(max_len, weight)` | Chamfer distance on EOS-padded `(N, L, 2)` sequences |
-| `soft_dtw_spec(max_len, gamma, weight)` | Soft-DTW on EOS-padded `(N, L, 2)` sequences |
-
-### `Population`
-
-For direct access to the underlying data structure:
+Matplotlib plotting helpers for interactive/notebook use — Gantt charts, time-use
+and participation-rate breakdowns, bigram heatmaps, start/end/duration histogram
+grids, sequence-probability waterfalls, and heatmap/bar-chart views of a
+`compare()` result. Not imported by `compare()`/`Evaluator`/`pairwise_distances`,
+so it never runs unless you call into it. Submodules: `frequency`, `times`,
+`transitions`, `plot` (schedule-level charts), `results` (result-level charts) —
+see each module's docstring for the full function list.
 
 ```python
-from acteval import Population
+from acteval.plot.plot import gantt
 
-pop = Population(observed)
-print(pop.acts)       # activity labels per episode
-print(pop.durations)  # durations as numpy array
+gantt(observed)
 ```
 
 ## Reading the results
 
-### Accessing results
+### The fast path: `summary()`, `rank_models()`, `best_model`
 
-`compare()` returns an `EvalResult` with distances and descriptions at three levels of aggregation. Each level is accessed via a property that returns a view object with `.distances` and `.descriptions` DataFrames:
+For comparing models against each other, these three are usually all you need:
 
-| Property | Index | Content |
-|----------|-------|---------|
-| `result.features.combined.distances` | `(domain, feature, segment)` | Per-feature distances — lower is closer to observed |
-| `result.features.combined.descriptions` | `(domain, feature, segment)` | Per-feature descriptive statistics (e.g. average start time) |
-| `result.groups.combined.distances` | `(domain, feature)` | Distances averaged across segments |
-| `result.groups.combined.descriptions` | `(domain, feature)` | Descriptions averaged across segments |
-| `result.domains.combined.distances` | `(domain,)` | Distances averaged across features — one row per domain |
-| `result.domains.combined.descriptions` | `(domain,)` | Descriptions averaged across features |
+```python
+# df_a is the Quick start `synthetic`; df_b is a deliberately bad model
+# (everyone at "work" all day) to make the comparison obvious.
+df_a = synthetic
+df_b = pd.DataFrame([
+    {"pid": 0, "act": "work", "start": 0, "end": 24, "duration": 24},
+    {"pid": 1, "act": "work", "start": 0, "end": 24, "duration": 24},
+    {"pid": 2, "act": "work", "start": 0, "end": 24, "duration": 24},
+])
+result = compare(observed, {"model_a": df_a, "model_b": df_b})
+
+# Mean domain distance per model (lower is better)
+print(result.rank_models())
+# model_a    0.225144
+# model_b    0.698380
+# dtype: float64
+
+# Best model
+print(result.best_model)   # "model_a"
+
+# Domain-level summary table
+print(result.summary())
+#                   model_a   model_b
+# domain
+# creativity       0.166667  0.333333
+# feasibility      0.333333  1.000000
+# participations   0.162037  0.988889
+# timing           0.082728  0.669676
+# transitions      0.380952  0.500000
+```
 
 Save all levels to CSV at once with `result.save("output_dir/")`.
+
+### The one thing to remember: `result.at(level, split)`
+
+For anything more detailed than the summary table — a specific aggregation level, or a specific split — `result.at(...)` is the one accessor to remember:
+
+```python
+result.at()                              # domains × combined (result.at().distances == result.summary())
+result.at("groups")                      # groups × combined
+result.at("features", "by_attribute")    # features × by_attribute (requires split_on)
+result.at("domains", "by_category")      # domains × by_category   (requires split_on)
+```
+
+`level` is one of `"features"`, `"groups"`, `"domains"` (most → least granular); `split` is one of `"combined"`, `"by_attribute"`, `"by_category"` (the latter two require `split_on` — see [Splitting by attribute](#splitting-by-attribute)). Each call returns an `AggregatedResult` with `.distances` and `.descriptions` DataFrames — the former is what feeds `summary()`/`rank_models()`, the latter carries descriptive stats (e.g. average start time) at the same index. Passing anything else raises `ValueError` listing the allowed values.
+
+`result.at(level, split)` is a thin dispatcher over chained properties of the same names — `result.at("groups", "by_attribute")` and `result.groups.by_attribute` return the exact same object, so use whichever reads better at the call site. `result.raw` exposes the pre-aggregation data (one `ResultFrame` each for descriptions and distances) that every level above is aggregated from; only needed if you're building custom aggregations of your own.
 
 Distances are in the range **0–1** (lower is better). A distance of `0.0` means the synthetic distribution perfectly matches observed; `1.0` is the maximum penalty.
 
@@ -253,37 +264,103 @@ Distances are in the range **0–1** (lower is better). A distance of `0.0` mean
 
 ### Evaluation domains
 
-| Domain | What it measures |
-|--------|-----------------|
-| `participations` | Who does what and how often — participation rates, joint participation, sequence lengths |
-| `transitions` | Activity sequences — 2-, 3-, and 4-gram transition patterns |
-| `timing` | When and how long — start times, durations, and their joint distributions |
-| `creativity` | How novel and diverse the synthetic schedules are relative to observed |
-| `feasibility` | Structural validity — home-based schedules, no consecutive duplicate activities |
+| Domain | What it measures | `disable=[...]` prefix |
+|--------|-----------------|-------------------------|
+| `participations` | Who does what and how often — participation rates, joint participation, sequence lengths | `jobs.participations.*` |
+| `transitions` | Activity sequences — 2-, 3-, and 4-gram transition patterns | `jobs.transitions.*` |
+| `timing` | When and how long — start times, durations, and their joint distributions | `jobs.timing.*` |
+| `creativity` | How novel and diverse the synthetic schedules are relative to observed | `jobs.creativity.*` |
+| `feasibility` | Structural validity — home-based schedules, no consecutive duplicate activities | `jobs.feasibility.*` |
+| `sequences` | Full abbreviated tour-string distributions (e.g. `h>w>h`); off by default | `jobs.sequences.*` |
 
-### Ranking models
+The rightmost column is what to pass to `disable=[...]` (or `--disable` on the
+CLI) to switch off part of a domain — see [Disabling specific
+metrics](#disabling-specific-metrics). Call `list_features()` to see every
+individual feature computed within each domain (the finer-grained rows behind
+`result.features`), or `list_disable_keys()` for every valid `disable=[...]`
+path.
 
-```python
-result = compare(observed, {"model_a": df_a, "model_b": df_b})
+## CLI
 
-# Mean domain distance per model (lower is better)
-print(result.rank_models())
-# model_a    0.12
-# model_b    0.19
+`acteval` ships with a command-line interface for comparing models without writing
+Python. It has two subcommands: `compare` (the primary one) and `filter`.
 
-# Best model
-print(result.best_model)   # "model_a"
-
-# Domain-level summary table
-print(result.summary())
-#                   model_a  model_b
-# domain
-# creativity           0.08     0.14
-# feasibility          0.03     0.05
-# participations       0.11     0.18
-# timing               0.16     0.22
-# transitions          0.22     0.35
 ```
+acteval compare TARGET [--target-attrs PATH] -m NAME SCHEDULE [ATTRS] [-m ...] [options]
+```
+
+```bash
+# Compare one model to observed data
+acteval compare observed.csv -m my_model synthetic.csv
+
+# Compare multiple models side-by-side
+acteval compare observed.csv -m model_a synthetic_a.csv -m model_b synthetic_b.csv
+
+# Save results to CSV files
+acteval compare observed.csv -m my_model synthetic.csv -o results/
+
+# Show group-level detail instead of domain summary
+acteval compare observed.csv -m my_model synthetic.csv -l groups
+
+# Use a custom config file
+acteval compare observed.csv -m my_model synthetic.csv -c custom.toml
+
+# Disable specific metrics without a custom config file
+acteval compare observed.csv -m my_model synthetic.csv --disable jobs.creativity.novelty
+```
+
+Input files can be CSV or Parquet (detected by extension). Run `acteval compare --help` for the full option list.
+
+#### Advanced: splitting by attribute and batch mode
+
+```bash
+# Split evaluation by attribute (e.g. gender)
+# Per-model attrs are the third argument to -m
+# Attributes must be provided for the target and ALL models, or not at all
+acteval compare observed.csv --target-attrs target_attrs.csv \
+  -m model_a synthetic_a.csv synth_attrs_a.csv \
+  -m model_b synthetic_b.csv synth_attrs_b.csv \
+  --split-on gender
+
+# Batch mode: auto-discover model subdirectories
+# Each subdir becomes a model (name = dir name); schedule and attrs files are
+# classified by their columns (pid + act → schedule; pid + other cols → attrs)
+acteval compare observed.csv --batch models/
+
+# Batch mode with attribute splitting
+acteval compare observed.csv --target-attrs target_attrs.csv --batch models/ --split-on gender
+```
+
+**Attribute rules:**
+- Attributes must be provided for **all** inputs (target + every model) or **none**. Partial specification raises an error.
+- `--split-on` and `--target-attrs` must be specified together.
+- In batch mode, if any model subdirectory contains an attributes file, all subdirectories must contain one.
+
+**Batch directory layout:**
+```
+models/
+  model_a/
+    schedules.csv      ← has pid, act → classified as schedule
+    attributes.csv     ← has pid + other cols, no act → classified as attrs
+  model_b/
+    output.parquet
+```
+
+### `acteval filter`
+
+Filter a schedule file down to persons with a specific structural issue — useful for
+spot-checking a synthetic population before running `compare`.
+
+```bash
+# Schedules that don't start and end at home
+acteval filter non-home-based synthetic.csv -o flagged.csv
+
+# Schedules with consecutive duplicate activities (default: home, work, education)
+acteval filter consecutive synthetic.csv --act home shop
+```
+
+Without `-o/--output`, filtered rows are printed to stdout as CSV. Run
+`acteval filter --help` for the full option list.
 
 ## Development
 

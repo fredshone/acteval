@@ -1,3 +1,5 @@
+import pytest
+
 from acteval.evaluate import Evaluator, compare
 
 
@@ -37,3 +39,31 @@ def test_evaluator_reuse_is_independent(observed, synthetic):
     result2 = evaluator.compare({"b": synthetic})
     assert list(result1.model_names) == ["a"]
     assert list(result2.model_names) == ["b"]
+
+
+def test_at_default_matches_domains_combined(observed, synthetic):
+    result = compare(observed, synthetic)
+    assert result.at().distances.equals(result.domains.combined.distances)
+
+
+@pytest.mark.parametrize(
+    "level,attr",
+    [("features", "features"), ("groups", "groups"), ("domains", "domains")],
+)
+def test_at_level_matches_property(observed, synthetic, level, attr):
+    result = compare(observed, synthetic)
+    assert result.at(level=level).distances.equals(
+        getattr(result, attr).combined.distances
+    )
+
+
+def test_at_invalid_level_raises_value_error(observed, synthetic):
+    result = compare(observed, synthetic)
+    with pytest.raises(ValueError, match="level"):
+        result.at(level="not_a_level")
+
+
+def test_at_invalid_split_raises_value_error(observed, synthetic):
+    result = compare(observed, synthetic)
+    with pytest.raises(ValueError, match="split"):
+        result.at(split="not_a_split")

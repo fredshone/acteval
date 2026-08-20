@@ -1,5 +1,6 @@
 from pandas import DataFrame
 
+from acteval.evaluate import compare
 from acteval.features.creativity import (
     conservatism,
     diversity,
@@ -8,6 +9,7 @@ from acteval.features.creativity import (
     homogeneity,
     novelty,
 )
+from acteval.population import Population
 
 
 def test_hash_schedule():
@@ -18,7 +20,7 @@ def test_hash_schedule():
             {"pid": 0, "act": "home", "duration": 10},
         ]
     )
-    assert hash_schedule(schedule) == "home10work10home10"
+    assert hash_schedule(Population(schedule)) == "home10work10home10"
 
 
 def test_hash_population():
@@ -31,7 +33,10 @@ def test_hash_population():
             {"pid": 1, "act": "work", "duration": 10},
         ]
     )
-    assert hash_population(population) == {"home10work10", "home10work10home10"}
+    assert hash_population(Population(population)) == {
+        "home10work10",
+        "home10work10home10",
+    }
 
 
 def test_internal_uniqueness_full():
@@ -44,7 +49,7 @@ def test_internal_uniqueness_full():
             {"pid": 1, "act": "work", "duration": 10},
         ]
     )
-    hashed = hash_population(population)
+    hashed = hash_population(Population(population))
     assert diversity(population, hashed) == 1
     assert homogeneity(population, hashed) == 0
 
@@ -60,7 +65,7 @@ def test_internal_uniqueness_half():
             {"pid": 1, "act": "home", "duration": 10},
         ]
     )
-    hashed = hash_population(population)
+    hashed = hash_population(Population(population))
     assert diversity(population, hashed) == 0.5
     assert homogeneity(population, hashed) == 0.5
 
@@ -84,8 +89,11 @@ def test_novelty_none():
             {"pid": 1, "act": "work", "duration": 10},
         ]
     )
-    assert novelty(hash_population(a), hash_population(b)) == 0
-    assert conservatism(hash_population(a), hash_population(b)) == 1
+    assert novelty(hash_population(Population(a)), hash_population(Population(b))) == 0
+    assert (
+        conservatism(hash_population(Population(a)), hash_population(Population(b)))
+        == 1
+    )
 
 
 def test_novelty_full():
@@ -108,8 +116,11 @@ def test_novelty_full():
             {"pid": 3, "act": "shop", "duration": 10},
         ]
     )
-    assert novelty(hash_population(a), hash_population(b)) == 1
-    assert conservatism(hash_population(a), hash_population(b)) == 0
+    assert novelty(hash_population(Population(a)), hash_population(Population(b))) == 1
+    assert (
+        conservatism(hash_population(Population(a)), hash_population(Population(b)))
+        == 0
+    )
 
 
 def test_novelty_partial():
@@ -132,5 +143,37 @@ def test_novelty_partial():
             {"pid": 3, "act": "shop", "duration": 10},
         ]
     )
-    assert novelty(hash_population(a), hash_population(b)) == 0.5
-    assert conservatism(hash_population(a), hash_population(b)) == 0.5
+    assert (
+        novelty(hash_population(Population(a)), hash_population(Population(b))) == 0.5
+    )
+    assert (
+        conservatism(hash_population(Population(a)), hash_population(Population(b)))
+        == 0.5
+    )
+
+
+def test_compare_end_to_end_with_only_start_end_no_duration_column():
+    """Regression test: the observed contract is "any two of start/end/duration
+    are sufficient" — a population with only start/end (no duration column)
+    must not break creativity hashing, which used to reach for a raw
+    ``.duration`` column directly."""
+    observed = DataFrame(
+        [
+            {"pid": 0, "act": "home", "start": 0, "end": 6},
+            {"pid": 0, "act": "work", "start": 6, "end": 14},
+            {"pid": 0, "act": "home", "start": 14, "end": 24},
+            {"pid": 1, "act": "home", "start": 0, "end": 10},
+            {"pid": 1, "act": "work", "start": 10, "end": 24},
+        ]
+    )
+    synthetic = DataFrame(
+        [
+            {"pid": 0, "act": "home", "start": 0, "end": 6},
+            {"pid": 0, "act": "shop", "start": 6, "end": 14},
+            {"pid": 0, "act": "home", "start": 14, "end": 24},
+            {"pid": 1, "act": "home", "start": 0, "end": 12},
+            {"pid": 1, "act": "work", "start": 12, "end": 24},
+        ]
+    )
+    result = compare(observed, {"my_model": synthetic})
+    assert "creativity" in result.domains.combined.distances.index

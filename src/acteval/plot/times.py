@@ -5,7 +5,7 @@ from matplotlib import colormaps, patches
 from matplotlib import pyplot as plt
 from matplotlib.figure import Axes, Figure
 
-from acteval.describe.utils import _to_population
+from acteval.plot.utils import _to_population
 from acteval.features.times import (
     durations_by_act,
     end_times_by_act,

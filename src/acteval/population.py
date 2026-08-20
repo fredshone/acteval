@@ -14,6 +14,9 @@ class Population:
     Converts a DataFrame once and caches all derived quantities to avoid
     redundant computation across feature extraction functions.
 
+    This is internal plumbing that ``compare()``/``Evaluator``/
+    ``pairwise_distances()`` build on — most users won't construct it directly.
+
     Eager attributes (always computed):
         acts: activity strings.
         act_codes: integer-encoded activities (0, 1, ...).

@@ -81,6 +81,7 @@ def _make_args(target, model_pairs, **kwargs):
         target_attrs=None,
         split_on=None,
         config=None,
+        disable=None,
         level="domains",
         output=None,
         verbose=False,
@@ -110,7 +111,7 @@ def test_parser_requires_target_and_model():
 
 def test_parser_minimal():
     p = _build_parser()
-    args = p.parse_args(["obs.csv", "--model", "m1", "syn.csv"])
+    args = p.parse_args(["compare", "obs.csv", "--model", "m1", "syn.csv"])
     assert args.target == "obs.csv"
     assert args.target_attrs is None
     assert args.model == [["m1", "syn.csv"]]
@@ -118,46 +119,87 @@ def test_parser_minimal():
     assert args.verbose is False
 
 
-def test_parser_target_attrs_positional():
+def test_parser_target_attrs_flag():
     p = _build_parser()
-    args = p.parse_args(["obs.csv", "ta.csv", "-m", "m1", "syn.csv"])
+    args = p.parse_args(
+        ["compare", "obs.csv", "--target-attrs", "ta.csv", "-m", "m1", "syn.csv"]
+    )
     assert args.target == "obs.csv"
     assert args.target_attrs == "ta.csv"
 
 
 def test_parser_multiple_models():
     p = _build_parser()
-    args = p.parse_args(["obs.csv", "--model", "a", "a.csv", "--model", "b", "b.csv"])
+    args = p.parse_args(
+        ["compare", "obs.csv", "--model", "a", "a.csv", "--model", "b", "b.csv"]
+    )
     assert args.model == [["a", "a.csv"], ["b", "b.csv"]]
 
 
 def test_parser_level_choices():
     p = _build_parser()
     for level in ("domains", "groups", "features"):
-        args = p.parse_args(["obs.csv", "--model", "m", "s.csv", "--level", level])
+        args = p.parse_args(
+            ["compare", "obs.csv", "--model", "m", "s.csv", "--level", level]
+        )
         assert args.level == level
 
     with pytest.raises(SystemExit):
-        p.parse_args(["obs.csv", "--model", "m", "s.csv", "--level", "invalid"])
+        p.parse_args(
+            ["compare", "obs.csv", "--model", "m", "s.csv", "--level", "invalid"]
+        )
 
 
 def test_parser_short_model_flag():
     p = _build_parser()
-    args = p.parse_args(["obs.csv", "-m", "m1", "syn.csv"])
+    args = p.parse_args(["compare", "obs.csv", "-m", "m1", "syn.csv"])
     assert args.target == "obs.csv"
     assert args.model == [["m1", "syn.csv"]]
 
 
 def test_parser_model_inline_attrs():
     p = _build_parser()
-    args = p.parse_args(["obs.csv", "-m", "m1", "syn.csv", "attrs.csv"])
+    args = p.parse_args(["compare", "obs.csv", "-m", "m1", "syn.csv", "attrs.csv"])
     assert args.model == [["m1", "syn.csv", "attrs.csv"]]
+
+
+def test_parser_disable_flag():
+    p = _build_parser()
+    args = p.parse_args(
+        [
+            "compare",
+            "obs.csv",
+            "-m",
+            "m",
+            "s.csv",
+            "--disable",
+            "jobs.creativity.novelty",
+        ]
+    )
+    assert args.disable == ["jobs.creativity.novelty"]
+
+
+def test_parser_disable_flag_multiple_keys():
+    p = _build_parser()
+    args = p.parse_args(
+        [
+            "compare",
+            "obs.csv",
+            "-m",
+            "m",
+            "s.csv",
+            "--disable",
+            "jobs.creativity.novelty",
+            "jobs.transitions.4-gram",
+        ]
+    )
+    assert args.disable == ["jobs.creativity.novelty", "jobs.transitions.4-gram"]
 
 
 def test_parser_short_flags():
     p = _build_parser()
     args = p.parse_args(
-        ["obs.csv", "-m", "m", "s.csv", "-l", "groups", "-o", "out/", "-v"]
+        ["compare", "obs.csv", "-m", "m", "s.csv", "-l", "groups", "-o", "out/", "-v"]
     )
     assert args.level == "groups"
     assert args.output == "out/"
@@ -166,24 +208,26 @@ def test_parser_short_flags():
 
 def test_parser_batch_flag():
     p = _build_parser()
-    args = p.parse_args(["obs.csv", "--batch", "models/"])
+    args = p.parse_args(["compare", "obs.csv", "--batch", "models/"])
     assert args.batch == "models/"
     assert args.model is None
 
-    args2 = p.parse_args(["obs.csv", "-b", "models/"])
+    args2 = p.parse_args(["compare", "obs.csv", "-b", "models/"])
     assert args2.batch == "models/"
 
 
 def test_parser_split_on_single():
     p = _build_parser()
-    args = p.parse_args(["obs.csv", "--model", "m", "s.csv", "--split-on", "gender"])
+    args = p.parse_args(
+        ["compare", "obs.csv", "--model", "m", "s.csv", "--split-on", "gender"]
+    )
     assert args.split_on == ["gender"]
 
 
 def test_parser_split_on_multiple_space_separated():
     p = _build_parser()
     args = p.parse_args(
-        ["obs.csv", "--model", "m", "s.csv", "--split-on", "gender", "age"]
+        ["compare", "obs.csv", "--model", "m", "s.csv", "--split-on", "gender", "age"]
     )
     assert args.split_on == ["gender", "age"]
 
@@ -192,7 +236,17 @@ def test_parser_split_on_multiple_repeated_flag():
     """--split-on col1 --split-on col2 must accumulate, not overwrite."""
     p = _build_parser()
     args = p.parse_args(
-        ["obs.csv", "--model", "m", "s.csv", "--split-on", "gender", "--split-on", "age"]
+        [
+            "compare",
+            "obs.csv",
+            "--model",
+            "m",
+            "s.csv",
+            "--split-on",
+            "gender",
+            "--split-on",
+            "age",
+        ]
     )
     assert args.split_on == ["gender", "age"]
 
@@ -268,6 +322,15 @@ def test_run_two_models(csv_files, capsys):
     out = capsys.readouterr().out
     assert "m1" in out
     assert "m2" in out
+
+
+def test_run_disable(csv_files, capsys):
+    obs_path, syn_path = csv_files
+    args = _make_args(obs_path, [["m1", syn_path]], disable=["jobs.creativity.novelty"])
+    _run(args)
+    out = capsys.readouterr().out
+    assert "Domain distances" in out
+    assert "Best model" in out
 
 
 def test_run_start_end_only_input(tmp_path, capsys):
@@ -469,7 +532,9 @@ def test_run_batch_with_version_dirs(csv_files, tmp_path, capsys):
         for ver in ("version_0", "version_1"):
             verdir = subdir / ver
             verdir.mkdir(parents=True)
-        pd.DataFrame(_SYNTHETIC_ROWS).to_csv(subdir / "version_1" / "schedule.csv", index=False)
+        pd.DataFrame(_SYNTHETIC_ROWS).to_csv(
+            subdir / "version_1" / "schedule.csv", index=False
+        )
     args = _make_args(obs_path, None, batch=str(tmp_path))
     _run(args)
     out = capsys.readouterr().out
@@ -522,7 +587,9 @@ def test_run_batch_version_dirs_with_attrs(csv_files, tmp_path, attrs_csv, capsy
     assert "attrs" in out
 
 
-def test_run_batch_inconsistent_attrs_without_split_on_succeeds(csv_files, tmp_path, capsys):
+def test_run_batch_inconsistent_attrs_without_split_on_succeeds(
+    csv_files, tmp_path, capsys
+):
     """Batch with mixed attrs presence and no --split-on succeeds; attrs are ignored."""
     obs_path, _ = csv_files
     for i, name in enumerate(["model_a", "model_b"]):
@@ -555,5 +622,5 @@ def test_run_with_progress_enabled(csv_files, capsys):
 def test_parser_no_progress_flag():
     """--no-progress flag is accepted by the parser."""
     p = _build_parser()
-    args = p.parse_args(["obs.csv", "-m", "m", "syn.csv", "--no-progress"])
+    args = p.parse_args(["compare", "obs.csv", "-m", "m", "syn.csv", "--no-progress"])
     assert args.no_progress is True

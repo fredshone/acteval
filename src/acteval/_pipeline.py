@@ -1,13 +1,8 @@
 """Evaluation pipeline: orchestrates job execution and aggregates results.
 
 This module is the core evaluation engine. ``evaluate.py`` is a thin public API
-that builds ``Population`` objects and calls into here.
-
-## Entry points
-
-- ``describe()``: applies three-tier aggregation and returns the six output
-  DataFrames that ``compare()`` exposes.
-- ``describe_labels()``: same but keyed by label (used for split evaluation).
+that builds ``Population`` objects, calls the low-level helpers here to compute
+per-feature rows, then aggregates them via ``_aggregation.py``.
 
 ## Three-tier aggregation
 
@@ -15,12 +10,12 @@ Raw per-segment rows are collapsed upward in three steps:
 
 1. ``_aggregate_features``: raw rows → one row per ``(domain, feature, segment)``
 2. ``_aggregate_groups``: → one row per ``(domain, feature)``, dropping entries
-   in ``_REMOVE_FEATURES``
+   in ``DEFAULT_REMOVE_FEATURES``
 3. ``_aggregate_domains``: → one row per ``domain``, dropping entries in
-   ``_REMOVE_GROUPS``
+   ``DEFAULT_REMOVE_GROUPS``
 
-``_REMOVE_FEATURES`` and ``_REMOVE_GROUPS`` are hardcoded lists; update them if
-feature or group names change.
+``DEFAULT_REMOVE_FEATURES`` and ``DEFAULT_REMOVE_GROUPS`` (in ``_aggregation.py``)
+are hardcoded lists; update them if feature or group names change.
 
 ## Output DataFrame structure
 
@@ -37,7 +32,6 @@ Each ``JobSpec`` carries a ``missing_distance`` value:
 - ``None`` (participation, transitions): EMD is computed on whatever data exists.
 """
 
-import warnings
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
@@ -85,29 +79,6 @@ def _aggregate_features(
     feat_dist["unit"] = descriptions["unit"].groupby(level=grouper).first()
 
     return feat_desc, feat_dist
-
-
-def describe(descriptions: DataFrame, distances: DataFrame) -> dict[str, DataFrame]:
-    from acteval._aggregation import (
-        descriptions_to_domain_level,
-        descriptions_to_group_level,
-        distances_to_domain_level,
-        distances_to_group_level,
-    )
-
-    feat_desc, feat_dist = _aggregate_features(descriptions, distances)
-    group_desc = descriptions_to_group_level(descriptions)
-    group_dist = distances_to_group_level(distances)
-    domain_desc = descriptions_to_domain_level(group_desc)
-    domain_dist = distances_to_domain_level(group_dist)
-    return {
-        "descriptions": feat_desc,
-        "distances": feat_dist,
-        "group_descriptions": group_desc,
-        "group_distances": group_dist,
-        "domain_descriptions": domain_desc,
-        "domain_distances": domain_dist,
-    }
 
 
 _PARALLEL_THRESHOLD = 50
@@ -402,48 +373,3 @@ def _infer_feature_shape(features: dict[str, tuple[np.array, np.array]]) -> np.a
             default_shape[0] = 1
             return default_shape
     return np.array([1])
-
-
-def evaluate(
-    synthetic_schedules: dict[str, DataFrame],
-    target_schedules: DataFrame,
-    report_stats: bool = True,
-    verbose: bool = False,
-):
-    """Deprecated: use ``compare`` instead."""
-    warnings.warn(
-        "evaluate is deprecated, use compare instead",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    from acteval.evaluate import compare
-
-    return compare(target_schedules, synthetic_schedules, report_stats=report_stats)
-
-
-def subsample_and_evaluate(
-    synthetic_schedules: dict[str, DataFrame],
-    synthetic_attributes: dict[str, DataFrame],
-    target_schedules: DataFrame,
-    target_attributes: DataFrame,
-    split_on: list[str],
-    report_stats: bool = True,
-    verbose: bool = False,
-):
-    """Deprecated: use ``compare_splits`` instead for better performance."""
-    warnings.warn(
-        "subsample_and_evaluate is deprecated, use compare_splits instead",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    from acteval.evaluate import compare_splits
-
-    return compare_splits(
-        observed=target_schedules,
-        synthetic_schedules=synthetic_schedules,
-        synthetic_attributes=synthetic_attributes,
-        target_attributes=target_attributes,
-        split_on=split_on,
-        report_stats=report_stats,
-        verbose=verbose,
-    )

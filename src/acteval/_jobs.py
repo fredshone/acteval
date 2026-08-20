@@ -1,4 +1,5 @@
 import sys
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -73,6 +74,69 @@ def load_config(path=None) -> dict:
         path = _DEFAULT_CONFIG
     with open(path, "rb") as f:
         return tomllib.load(f)
+
+
+def _dotted_keys(cfg: dict, prefix: str = "") -> list[str]:
+    """Flatten a nested config dict into a sorted list of dotted leaf paths."""
+    keys = []
+    for key, value in cfg.items():
+        full_key = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            keys.extend(_dotted_keys(value, full_key))
+        else:
+            keys.append(full_key)
+    return sorted(keys)
+
+
+def apply_overrides(cfg: dict, disable: list[str]) -> dict:
+    """Return a copy of *cfg* with each dotted ``section.key`` path in *disable* set to False.
+
+    Args:
+        cfg: Config dict as returned by ``load_config``.
+        disable: Dotted paths matching ``config.toml`` keys, e.g.
+            ``"jobs.creativity.novelty"`` or ``"jobs.transitions.4-gram"``.
+
+    Returns:
+        A new config dict with the requested keys switched off; *cfg* is left untouched.
+
+    Raises:
+        ValueError: If a dotted path does not match any known config key.
+    """
+    cfg = deepcopy(cfg)
+    for path in disable:
+        parts = path.split(".")
+        node = cfg
+        for part in parts[:-1]:
+            if not isinstance(node, dict) or part not in node:
+                raise ValueError(
+                    f"unknown disable key '{path}'; valid keys are: {_dotted_keys(cfg)}"
+                )
+            node = node[part]
+        leaf = parts[-1]
+        if not isinstance(node, dict) or leaf not in node:
+            raise ValueError(
+                f"unknown disable key '{path}'; valid keys are: {_dotted_keys(cfg)}"
+            )
+        node[leaf] = False
+    return cfg
+
+
+def list_disable_keys(config_path=None) -> list[str]:
+    """List every dotted ``jobs.section.key`` path accepted by ``disable=[...]``.
+
+    Discoverability companion to ``apply_overrides``/``compare(disable=...)``
+    so valid keys don't require reading ``config.toml`` or triggering the
+    ``ValueError`` from an unknown key.
+
+    Args:
+        config_path: Optional path to a custom config.toml; defaults to the
+            built-in config.
+
+    Returns:
+        Sorted list of dotted paths, e.g. ``["jobs.creativity.diversity", ...]``.
+    """
+    cfg = load_config(config_path)
+    return _dotted_keys(cfg.get("jobs", {}), prefix="jobs")
 
 
 def build_density_jobs(cfg: dict) -> list[JobSpec]:
@@ -288,7 +352,7 @@ def build_creativity_config(cfg: dict) -> CreativityConfig:
 
 
 def build_structural_config(cfg: dict) -> StructuralConfig:
-    s = cfg.get("jobs", {}).get("structural", {})
+    s = cfg.get("jobs", {}).get("feasibility", {})
     return StructuralConfig(
         home_based=s.get("home_based", True),
         home_based_novel=s.get("home_based_novel", False),
@@ -297,9 +361,18 @@ def build_structural_config(cfg: dict) -> StructuralConfig:
     )
 
 
-def get_jobs(config_path=None) -> EvalConfig:
-    """Load config and return active job specification."""
+def get_jobs(config_path=None, disable: list[str] | None = None) -> EvalConfig:
+    """Load config and return active job specification.
+
+    Args:
+        config_path: Optional path to a custom ``config.toml``; defaults to the
+            packaged config.
+        disable: Optional dotted ``section.key`` paths to switch off on top of
+            whatever ``config_path`` loads, e.g. ``["jobs.creativity.novelty"]``.
+    """
     cfg = load_config(config_path)
+    if disable:
+        cfg = apply_overrides(cfg, disable)
     return EvalConfig(
         density=build_density_jobs(cfg),
         creativity=build_creativity_config(cfg),
