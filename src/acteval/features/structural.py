@@ -6,6 +6,7 @@ from acteval.features._pid_features import PidFeatures
 from acteval.features._utils import _grouped_sum
 from acteval.population import Population
 
+
 def feasibility_index(
     home_based: bool = True, consecutive: bool = True, suffix: str = ""
 ) -> MultiIndex:

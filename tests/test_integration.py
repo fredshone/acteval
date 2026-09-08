@@ -253,7 +253,9 @@ class TestConfigComponents:
         """Disabling novelty removes novelty/conservatism rows."""
         jobs = _minimal_jobs(creativity=CreativityConfig(diversity=True, novelty=False))
         result = Evaluator(observed, jobs=jobs).compare({"m": synthetic})
-        features = set(result.features.combined.distances.index.get_level_values("feature"))
+        features = set(
+            result.features.combined.distances.index.get_level_values("feature")
+        )
         assert "homogeneity" in features
         assert "novelty" not in features
         assert "conservatism" not in features
@@ -262,7 +264,9 @@ class TestConfigComponents:
         """Disabling diversity removes diversity/homogeneity rows."""
         jobs = _minimal_jobs(creativity=CreativityConfig(diversity=False, novelty=True))
         result = Evaluator(observed, jobs=jobs).compare({"m": synthetic})
-        features = set(result.features.combined.distances.index.get_level_values("feature"))
+        features = set(
+            result.features.combined.distances.index.get_level_values("feature")
+        )
         assert "conservatism" in features
         assert "diversity" not in features
         assert "homogeneity" not in features
@@ -273,28 +277,40 @@ class TestConfigComponents:
             structural=StructuralConfig(home_based=True, consecutive=False)
         )
         result = Evaluator(observed, jobs=jobs).compare({"m": synthetic})
-        features = set(result.features.combined.distances.index.get_level_values("feature"))
+        features = set(
+            result.features.combined.distances.index.get_level_values("feature")
+        )
         assert any("not home based" in f for f in features)
         assert not any("consecutive" in f for f in features)
 
     def test_structural_novel_job_adds_novel_rows(self, observed, synthetic):
         """Enabling home_based_novel adds '(novel)' rows to output."""
         jobs = _minimal_jobs(
-            structural=StructuralConfig(home_based=False, consecutive=False, home_based_novel=True)
+            structural=StructuralConfig(
+                home_based=False, consecutive=False, home_based_novel=True
+            )
         )
         result = Evaluator(observed, jobs=jobs).compare({"m": synthetic})
-        features = set(result.features.combined.distances.index.get_level_values("feature"))
+        features = set(
+            result.features.combined.distances.index.get_level_values("feature")
+        )
         assert any("(novel)" in f for f in features)
 
-    def test_novel_structural_without_creativity_does_not_error(self, observed, synthetic):
+    def test_novel_structural_without_creativity_does_not_error(
+        self, observed, synthetic
+    ):
         """Novel structural jobs work even when creativity is disabled (obs_hashes still computed)."""
         jobs = _minimal_jobs(
             creativity=CreativityConfig(diversity=False, novelty=False),
             structural=StructuralConfig(
-                home_based=False, consecutive=False,
-                home_based_novel=True, consecutive_novel=True,
+                home_based=False,
+                consecutive=False,
+                home_based_novel=True,
+                consecutive_novel=True,
             ),
         )
         result = Evaluator(observed, jobs=jobs).compare({"m": synthetic})
-        features = set(result.features.combined.distances.index.get_level_values("feature"))
+        features = set(
+            result.features.combined.distances.index.get_level_values("feature")
+        )
         assert any("(novel)" in f for f in features)

@@ -154,14 +154,22 @@ def _observed_base_creativity(
 
     if config.diversity:
         desc_idx.append(("creativity", "diversity", "all"))
-        desc_weight.append(n); desc_val.append(obs_diversity); desc_unit.append("prob. unique")
+        desc_weight.append(n)
+        desc_val.append(obs_diversity)
+        desc_unit.append("prob. unique")
         dist_idx.append(("creativity", "homogeneity", "all"))
-        dist_weight.append(n); dist_val.append(1 - obs_diversity); dist_unit.append("prob. not unique")
+        dist_weight.append(n)
+        dist_val.append(1 - obs_diversity)
+        dist_unit.append("prob. not unique")
     if config.novelty:
         desc_idx.append(("creativity", "novelty", "all"))
-        desc_weight.append(n); desc_val.append(1); desc_unit.append("prob. novel")
+        desc_weight.append(n)
+        desc_val.append(1)
+        desc_unit.append("prob. novel")
         dist_idx.append(("creativity", "conservatism", "all"))
-        dist_weight.append(n); dist_val.append(0); dist_unit.append("prob. conservative")
+        dist_weight.append(n)
+        dist_val.append(0)
+        dist_unit.append("prob. conservative")
 
     base_desc = DataFrame(
         {"observed__weight": desc_weight, "observed": desc_val, "unit": desc_unit},
@@ -199,15 +207,19 @@ def _model_cols_creativity(
 
     if config.diversity:
         desc_idx.append(("creativity", "diversity", "all"))
-        desc_weight.append(y_count); desc_val.append(y_diversity)
+        desc_weight.append(y_count)
+        desc_val.append(y_diversity)
         dist_idx.append(("creativity", "homogeneity", "all"))
-        dist_weight.append(y_count); dist_val.append(1 - y_diversity)
+        dist_weight.append(y_count)
+        dist_val.append(1 - y_diversity)
     if config.novelty:
         y_novelty = creativity.novelty(observed_hash, y_hash)
         desc_idx.append(("creativity", "novelty", "all"))
-        desc_weight.append(y_count); desc_val.append(y_novelty)
+        desc_weight.append(y_count)
+        desc_val.append(y_novelty)
         dist_idx.append(("creativity", "conservatism", "all"))
-        dist_weight.append(y_count); dist_val.append(1 - y_novelty)
+        dist_weight.append(y_count)
+        dist_val.append(1 - y_novelty)
 
     desc = DataFrame(
         {f"{model}__weight": desc_weight, model: desc_val},

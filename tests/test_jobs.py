@@ -1,4 +1,10 @@
-from acteval._jobs import CreativityConfig, EvalConfig, JobSpec, StructuralConfig, get_jobs
+from acteval._jobs import (
+    CreativityConfig,
+    EvalConfig,
+    JobSpec,
+    StructuralConfig,
+    get_jobs,
+)
 
 
 def test_get_jobs_returns_eval_config():
@@ -65,5 +71,10 @@ def test_structural_config_enabled_property():
 
 
 def test_structural_config_needs_novel_pids():
-    assert StructuralConfig(home_based_novel=False, consecutive_novel=False).needs_novel_pids is False
+    assert (
+        StructuralConfig(
+            home_based_novel=False, consecutive_novel=False
+        ).needs_novel_pids
+        is False
+    )
     assert StructuralConfig(home_based_novel=True).needs_novel_pids is True

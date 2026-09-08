@@ -8,8 +8,8 @@ from matplotlib.colors import ListedColormap as CMap
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
 
-from acteval.plot.utils import _to_population
 from acteval.features.transitions import sequence_probs
+from acteval.plot.utils import _to_population
 
 
 def sequence_prob_plot(observed, ys: Optional[dict], **kwargs) -> Figure:

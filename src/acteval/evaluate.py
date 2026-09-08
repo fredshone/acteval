@@ -20,7 +20,7 @@ from acteval._pipeline import (
     _observed_base_creativity,
     _observed_base_structural,
 )
-from acteval._progress import bar_clear_item as _bar_clear_item
+from acteval._progress import bar_scope as _bar_scope
 from acteval._progress import bar_set_item as _bar_set_item
 from acteval._progress import make_bar as _make_bar
 from acteval._result_frame import ResultFrame
@@ -479,22 +479,18 @@ class Evaluator:
         # Phase 1: run every feature function over the full target population,
         # storing per-pid results keyed by (domain, name).  These are cheap to
         # subset later, so we compute them once here rather than once per split.
-        _own_feature_bar = feature_bar is None and self._progress
-        if _own_feature_bar:
-            feature_bar = _make_bar(
-                "target [features]", len(self._jobs.density), colour="cyan"
-            )
-        for spec in self._jobs.density:
-            if feature_bar is not None:
+        with _bar_scope(
+            feature_bar,
+            "target [features]",
+            len(self._jobs.density),
+            self._progress,
+            colour="cyan",
+        ) as feature_bar:
+            for spec in self._jobs.density:
                 _bar_set_item(feature_bar, spec.name)
-            key = (spec.domain, spec.name)
-            self._target_pid_features[key] = spec.feature_fn(self._target_pop)
-            if feature_bar is not None:
+                key = (spec.domain, spec.name)
+                self._target_pid_features[key] = spec.feature_fn(self._target_pop)
                 feature_bar.update(1)
-        if feature_bar is not None:
-            _bar_clear_item(feature_bar)
-        if _own_feature_bar:
-            feature_bar.close()
 
         # Phase 2: for each (split, category) combination, slice the target
         # population to only the relevant pids and aggregate their features.
@@ -529,53 +525,51 @@ class Evaluator:
             self._jobs.creativity.enabled or self._jobs.structural.needs_novel_pids
         )
 
-        _own_splits_bar = splits_bar is None and self._progress
-        if _own_splits_bar:
-            splits_bar = _make_bar(
-                "target [splits]", len(self._split_cat_info), colour="cyan"
-            )
-        for split, cat, sub_target, cached_subset in self._split_cat_info:
-            if splits_bar is not None:
+        with _bar_scope(
+            splits_bar,
+            "target [splits]",
+            len(self._split_cat_info),
+            self._progress,
+            colour="cyan",
+        ) as splits_bar:
+            for split, cat, sub_target, cached_subset in self._split_cat_info:
                 _bar_set_item(
                     splits_bar, cat if split == "__split__" else f"{split}={cat}"
                 )
-            if _needs_hashes:
-                obs_hash = creativity.hash_population(Population(sub_target))
-                self._obs_hashes[(split, cat)] = obs_hash
+                if _needs_hashes:
+                    obs_hash = creativity.hash_population(Population(sub_target))
+                    self._obs_hashes[(split, cat)] = obs_hash
 
-            if self._jobs.creativity.enabled:
-                bd, bi = _observed_base_creativity(
-                    sub_target, self._obs_hashes[(split, cat)], self._jobs.creativity
-                )
-                bd = _append_split_cat_index(bd, split, cat)
-                bi = _append_split_cat_index(bi, split, cat)
-                base_desc_parts.append(bd)
-                base_dist_parts.append(bi.drop("observed", axis=1))
+                if self._jobs.creativity.enabled:
+                    bd, bi = _observed_base_creativity(
+                        sub_target,
+                        self._obs_hashes[(split, cat)],
+                        self._jobs.creativity,
+                    )
+                    bd = _append_split_cat_index(bd, split, cat)
+                    bi = _append_split_cat_index(bi, split, cat)
+                    base_desc_parts.append(bd)
+                    base_dist_parts.append(bi.drop("observed", axis=1))
 
-            if self._jobs.structural.enabled:
-                base_struct = _observed_base_structural(
-                    sub_target, self._jobs.structural
-                )
-                base_struct = _append_split_cat_index(base_struct, split, cat)
-                base_desc_parts.append(base_struct)
-                base_dist_parts.append(base_struct.drop("observed", axis=1))
+                if self._jobs.structural.enabled:
+                    base_struct = _observed_base_structural(
+                        sub_target, self._jobs.structural
+                    )
+                    base_struct = _append_split_cat_index(base_struct, split, cat)
+                    base_desc_parts.append(base_struct)
+                    base_dist_parts.append(base_struct.drop("observed", axis=1))
 
-            for spec in self._jobs.density:
-                key = (spec.domain, spec.name)
-                obs_feat = cached_subset[key]
-                base, _ = _observed_base(spec, obs_feat)
-                base = _tag_density_index(base, spec.domain, spec.name, split, cat)
-                base_desc_parts.append(base.assign(unit=spec.description_name))
-                base_dist_parts.append(
-                    base[["observed__weight"]].assign(unit=spec.distance_name)
-                )
+                for spec in self._jobs.density:
+                    key = (spec.domain, spec.name)
+                    obs_feat = cached_subset[key]
+                    base, _ = _observed_base(spec, obs_feat)
+                    base = _tag_density_index(base, spec.domain, spec.name, split, cat)
+                    base_desc_parts.append(base.assign(unit=spec.description_name))
+                    base_dist_parts.append(
+                        base[["observed__weight"]].assign(unit=spec.distance_name)
+                    )
 
-            if splits_bar is not None:
                 splits_bar.update(1)
-        if splits_bar is not None:
-            _bar_clear_item(splits_bar)
-        if _own_splits_bar:
-            splits_bar.close()
 
         # _base_desc / _base_dist are the "observed" half of the wide DataFrames
         # that compare_population will build by concatenating model columns alongside.
@@ -669,33 +663,27 @@ class Evaluator:
                 )
             return self.report()
 
-        # Create all bars upfront so the user sees the full scope of work immediately.
+        # Create all bars upfront (one feature/splits pair per unit) so the
+        # user sees the full scope of work immediately.
         n_density = len(self._jobs.density)
         n_splits = sum(len(self._target_attributes[s].unique()) for s in self._split_on)
         models = list(synthetic_schedules.keys())
 
-        bar_specs: list[tuple[str, int, str]] = []
-        if not self._precomputed:
-            bar_specs += [
-                ("target [features]", n_density, "cyan"),
-                ("target [splits]", n_splits, "cyan"),
-            ]
-        for model in models:
-            bar_specs += [
-                (f"{model} [features]", n_density, "green"),
-                (f"{model} [splits]", n_splits, "green"),
-            ]
+        units: list[tuple[str, str]] = [] if self._precomputed else [("target", "cyan")]
+        units += [(model, "green") for model in models]
 
-        desc_width = max(len(label) for label, _, _ in bar_specs)
-        bars = [
-            _make_bar(label, total, pos, desc_width, colour)
-            for pos, (label, total, colour) in enumerate(bar_specs)
+        desc_width = max(len(f"{name} [features]") for name, _ in units)
+        bar_pairs = [
+            (
+                _make_bar(f"{name} [features]", n_density, 2 * i, desc_width, colour),
+                _make_bar(f"{name} [splits]", n_splits, 2 * i + 1, desc_width, colour),
+            )
+            for i, (name, colour) in enumerate(units)
         ]
 
-        bar_idx = 0
+        remaining_bars = iter(bar_pairs)
         if not self._precomputed:
-            self._precompute_target(feature_bar=bars[0], splits_bar=bars[1])
-            bar_idx = 2
+            self._precompute_target(*next(remaining_bars))
 
         for model, schedule in synthetic_schedules.items():
             attrs = (
@@ -703,20 +691,19 @@ class Evaluator:
                 if synthetic_attributes is not None
                 else None
             )
-            self._active_feature_bar = bars[bar_idx]
-            self._active_splits_bar = bars[bar_idx + 1]
+            self._active_feature_bar, self._active_splits_bar = next(remaining_bars)
             self.compare_population(
                 model=model,
                 schedule=schedule,
                 attributes=attrs,
                 verbose=verbose,
             )
-            bar_idx += 2
         self._active_feature_bar = None
         self._active_splits_bar = None
 
-        for bar in bars:
-            bar.close()
+        for feature_bar, splits_bar in bar_pairs:
+            feature_bar.close()
+            splits_bar.close()
 
         return self.report()
 
@@ -774,20 +761,14 @@ class Evaluator:
         attributes = self._apply_numeric_bins(attributes)
         pop = Population(schedule)
 
-        _own_feature_bar = feature_bar is None and self._progress
-        if _own_feature_bar:
-            feature_bar = _make_bar(f"{model} [features]", len(self._jobs.density))
         pid_features = {}
-        for spec in self._jobs.density:
-            if feature_bar is not None:
+        with _bar_scope(
+            feature_bar, f"{model} [features]", len(self._jobs.density), self._progress
+        ) as feature_bar:
+            for spec in self._jobs.density:
                 _bar_set_item(feature_bar, spec.name)
-            pid_features[(spec.domain, spec.name)] = spec.feature_fn(pop)
-            if feature_bar is not None:
+                pid_features[(spec.domain, spec.name)] = spec.feature_fn(pop)
                 feature_bar.update(1)
-        if feature_bar is not None:
-            _bar_clear_item(feature_bar)
-        if _own_feature_bar:
-            feature_bar.close()
 
         description_parts: list[DataFrame] = []
         distance_parts: list[DataFrame] = []
@@ -806,100 +787,98 @@ class Evaluator:
 
         # Iterate over (split, category) combinations and subset the
         # pre-computed features down to the relevant pids.
-        _own_splits_bar = splits_bar is None and self._progress
-        if _own_splits_bar:
-            splits_bar = _make_bar(f"{model} [splits]", len(self._split_cat_info))
-        for split, cat, _, cached_subset in self._split_cat_info:
-            if splits_bar is not None:
+        with _bar_scope(
+            splits_bar, f"{model} [splits]", len(self._split_cat_info), self._progress
+        ) as splits_bar:
+            for split, cat, _, cached_subset in self._split_cat_info:
                 _bar_set_item(
                     splits_bar, cat if split == "__split__" else f"{split}={cat}"
                 )
-            sample_pids = attributes[attributes[split] == cat].pid.values
-            synth_dense_pids = pop.dense_pids_from_original(sample_pids)
-            # Used below to skip density segments whose key activity is absent
-            # from this synthetic sub-population entirely.
-            synth_sub_acts = frozenset(
-                schedule.loc[schedule.pid.isin(sample_pids), "act"].unique()
-            )
-
-            if self._jobs.creativity.enabled:
-                c_desc, c_dist = _model_cols_creativity(
-                    model,
-                    pid_hashes,
-                    sample_pids,
-                    self._obs_hashes[(split, cat)],
-                    self._jobs.creativity,
+                sample_pids = attributes[attributes[split] == cat].pid.values
+                synth_dense_pids = pop.dense_pids_from_original(sample_pids)
+                # Used below to skip density segments whose key activity is absent
+                # from this synthetic sub-population entirely.
+                synth_sub_acts = frozenset(
+                    schedule.loc[schedule.pid.isin(sample_pids), "act"].unique()
                 )
-                c_desc = _append_split_cat_index(c_desc, split, cat)
-                c_dist = _append_split_cat_index(c_dist, split, cat)
-                description_parts.append(c_desc)
-                distance_parts.append(c_dist)
 
-            if self._jobs.structural.enabled:
-                novel_dense_pids = None
-                if self._jobs.structural.needs_novel_pids:
-                    obs_hash = self._obs_hashes[(split, cat)]
-                    novel_pids = np.array(
-                        [p for p in sample_pids if pid_hashes.get(p) not in obs_hash]
+                if self._jobs.creativity.enabled:
+                    c_desc, c_dist = _model_cols_creativity(
+                        model,
+                        pid_hashes,
+                        sample_pids,
+                        self._obs_hashes[(split, cat)],
+                        self._jobs.creativity,
                     )
-                    novel_dense_pids = pop.dense_pids_from_original(novel_pids)
-                s_cols = _model_cols_structural(
-                    model,
-                    feasibility_flags,
-                    synth_dense_pids,
-                    novel_dense_pids,
-                    self._jobs.structural,
-                )
-                for parts in (description_parts, distance_parts):
-                    tagged = _append_split_cat_index(s_cols.copy(), split, cat)
-                    parts.append(tagged)
+                    c_desc = _append_split_cat_index(c_desc, split, cat)
+                    c_dist = _append_split_cat_index(c_dist, split, cat)
+                    description_parts.append(c_desc)
+                    distance_parts.append(c_dist)
 
-            for spec in self._jobs.density:
-                key = (spec.domain, spec.name)
-                obs_feat = cached_subset[key]
-                # default holds the observed distribution shape; used as a
-                # fallback when the synthetic model has no data for a segment.
-                default = _make_default(obs_feat)
-
-                # Aggregate pre-computed per-pid features for just the pids in
-                # this split category, then drop segments where:
-                #   - the array is empty, or
-                #   - the segment's key activity is absent from the synthetic
-                #     sub-population (avoids spurious missing-activity penalties).
-                raw_synth = pid_features[key].subset(synth_dense_pids).aggregate()
-                synth_feat = {
-                    k: v
-                    for k, v in raw_synth.items()
-                    if len(v[0]) > 0
-                    and (
-                        _key_activities(k) is None
-                        or _key_activities(k).issubset(synth_sub_acts)
+                if self._jobs.structural.enabled:
+                    novel_dense_pids = None
+                    if self._jobs.structural.needs_novel_pids:
+                        obs_hash = self._obs_hashes[(split, cat)]
+                        novel_pids = np.array(
+                            [
+                                p
+                                for p in sample_pids
+                                if pid_hashes.get(p) not in obs_hash
+                            ]
+                        )
+                        novel_dense_pids = pop.dense_pids_from_original(novel_pids)
+                    s_cols = _model_cols_structural(
+                        model,
+                        feasibility_flags,
+                        synth_dense_pids,
+                        novel_dense_pids,
+                        self._jobs.structural,
                     )
-                }
+                    for parts in (description_parts, distance_parts):
+                        tagged = _append_split_cat_index(s_cols.copy(), split, cat)
+                        parts.append(tagged)
 
-                # w = weights, d = descriptive values, s = distance scores
-                w, d, s = _model_contribution(
-                    model, spec, obs_feat, synth_feat, default
-                )
-                desc_part = DataFrame({f"{model}__weight": w, model: d})
-                dist_part = DataFrame(
-                    {f"{model}__weight": w.reindex(s.index, fill_value=0), model: s}
-                )
-                desc_part = _tag_density_index(
-                    desc_part, spec.domain, spec.name, split, cat
-                )
-                dist_part = _tag_density_index(
-                    dist_part, spec.domain, spec.name, split, cat
-                )
-                description_parts.append(desc_part)
-                distance_parts.append(dist_part)
+                for spec in self._jobs.density:
+                    key = (spec.domain, spec.name)
+                    obs_feat = cached_subset[key]
+                    # default holds the observed distribution shape; used as a
+                    # fallback when the synthetic model has no data for a segment.
+                    default = _make_default(obs_feat)
 
-            if splits_bar is not None:
+                    # Aggregate pre-computed per-pid features for just the pids in
+                    # this split category, then drop segments where:
+                    #   - the array is empty, or
+                    #   - the segment's key activity is absent from the synthetic
+                    #     sub-population (avoids spurious missing-activity penalties).
+                    raw_synth = pid_features[key].subset(synth_dense_pids).aggregate()
+                    synth_feat = {
+                        k: v
+                        for k, v in raw_synth.items()
+                        if len(v[0]) > 0
+                        and (
+                            _key_activities(k) is None
+                            or _key_activities(k).issubset(synth_sub_acts)
+                        )
+                    }
+
+                    # w = weights, d = descriptive values, s = distance scores
+                    w, d, s = _model_contribution(
+                        model, spec, obs_feat, synth_feat, default
+                    )
+                    desc_part = DataFrame({f"{model}__weight": w, model: d})
+                    dist_part = DataFrame(
+                        {f"{model}__weight": w.reindex(s.index, fill_value=0), model: s}
+                    )
+                    desc_part = _tag_density_index(
+                        desc_part, spec.domain, spec.name, split, cat
+                    )
+                    dist_part = _tag_density_index(
+                        dist_part, spec.domain, spec.name, split, cat
+                    )
+                    description_parts.append(desc_part)
+                    distance_parts.append(dist_part)
+
                 splits_bar.update(1)
-        if splits_bar is not None:
-            _bar_clear_item(splits_bar)
-        if _own_splits_bar:
-            splits_bar.close()
 
         # Store results so report() can later concat them with _base_desc/dist.
         self.collected_descriptions[model] = concat(
