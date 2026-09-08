@@ -542,7 +542,9 @@ class Evaluator:
 
                 if self._jobs.creativity.enabled:
                     bd, bi = _observed_base_creativity(
-                        sub_target, self._obs_hashes[(split, cat)], self._jobs.creativity
+                        sub_target,
+                        self._obs_hashes[(split, cat)],
+                        self._jobs.creativity,
                     )
                     bd = _append_split_cat_index(bd, split, cat)
                     bi = _append_split_cat_index(bi, split, cat)
@@ -818,7 +820,11 @@ class Evaluator:
                     if self._jobs.structural.needs_novel_pids:
                         obs_hash = self._obs_hashes[(split, cat)]
                         novel_pids = np.array(
-                            [p for p in sample_pids if pid_hashes.get(p) not in obs_hash]
+                            [
+                                p
+                                for p in sample_pids
+                                if pid_hashes.get(p) not in obs_hash
+                            ]
                         )
                         novel_dense_pids = pop.dense_pids_from_original(novel_pids)
                     s_cols = _model_cols_structural(

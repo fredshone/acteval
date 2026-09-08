@@ -17,7 +17,9 @@ class _NullBar:
     def update(self, n: int = 1) -> None:
         pass
 
-    def set_description_str(self, desc: str | None = None, refresh: bool = True) -> None:
+    def set_description_str(
+        self, desc: str | None = None, refresh: bool = True
+    ) -> None:
         pass
 
     def close(self) -> None:

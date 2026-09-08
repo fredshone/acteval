@@ -34,7 +34,7 @@ class JobSpec:
 @dataclass(frozen=True)
 class CreativityConfig:
     diversity: bool = True  # enables diversity (desc) + homogeneity (dist)
-    novelty: bool = True    # enables novelty (desc) + conservatism (dist)
+    novelty: bool = True  # enables novelty (desc) + conservatism (dist)
 
     @property
     def enabled(self) -> bool:
