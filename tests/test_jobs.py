@@ -1,4 +1,10 @@
-from acteval._jobs import CreativityConfig, EvalConfig, JobSpec, StructuralConfig, get_jobs
+from acteval._jobs import (
+    CreativityConfig,
+    EvalConfig,
+    JobSpec,
+    StructuralConfig,
+    get_jobs,
+)
 
 
 def test_get_jobs_returns_eval_config():

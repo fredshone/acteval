@@ -5,12 +5,12 @@ from matplotlib import colormaps, patches
 from matplotlib import pyplot as plt
 from matplotlib.figure import Axes, Figure
 
-from acteval.plot.utils import _to_population
 from acteval.features.times import (
     durations_by_act,
     end_times_by_act,
     start_times_by_act,
 )
+from acteval.plot.utils import _to_population
 
 
 def times_distributions_plot(observed, ys: Optional[dict], **kwargs) -> Figure:

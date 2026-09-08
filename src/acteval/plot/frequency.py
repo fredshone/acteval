@@ -6,8 +6,8 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.patches import Patch
 
-from acteval.plot.utils import _to_population
 from acteval.features.frequency import binned_activity_density
+from acteval.plot.utils import _to_population
 
 
 def frequency_plots(observed, ys: Optional[dict], **kwargs):

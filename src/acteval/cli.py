@@ -454,7 +454,7 @@ def _run(args: argparse.Namespace) -> None:
         print_markdown(result.domains.combined.distances)
 
     ranked = result.rank_models()
-    print(f"\nMean distances:")
+    print("\nMean distances:")
     for k, v in ranked.items():
         print(f"\t{k}: {v}")
     print(f"Best model: {result.best_model}")
