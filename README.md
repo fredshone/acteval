@@ -203,7 +203,7 @@ results = {
 result = combine(results)
 ```
 
-> **Known limitation:** the shared `observed`/`unit` columns underlying feature →
+> **Known limitation:** the shared `target`/`unit` values underlying feature →
 > group → domain aggregation are taken from the *first* result only, so
 > re-aggregating a non-first target's columns uses that first target's weights
 > rather than its own. Each model's distances are still computed against its own
@@ -308,7 +308,7 @@ result.at("domains", "by_category")      # domains × by_category   (requires sp
 
 `level` is one of `"features"`, `"groups"`, `"domains"` (most → least granular); `split` is one of `"combined"`, `"by_attribute"`, `"by_category"` (the latter two require `split_on` — see [Splitting by attribute](#splitting-by-attribute)). Each call returns an `AggregatedResult` with `.distances` and `.descriptions` DataFrames — the former is what feeds `summary()`/`rank_models()`, the latter carries descriptive stats (e.g. average start time) at the same index. Passing anything else raises `ValueError` listing the allowed values.
 
-`result.at(level, split)` is a thin dispatcher over chained properties of the same names — `result.at("groups", "by_attribute")` and `result.groups.by_attribute` return the exact same object, so use whichever reads better at the call site. `result.raw` exposes the pre-aggregation data (one `ResultFrame` each for descriptions and distances) that every level above is aggregated from; only needed if you're building custom aggregations of your own.
+`result.at(level, split)` is a thin dispatcher over chained properties of the same names — `result.at("groups", "by_attribute")` and `result.groups.by_attribute` return the exact same object, so use whichever reads better at the call site. `.descriptions` always includes a `"target"` column alongside each model's, showing the observed population's own value for comparison. `result.raw` exposes the pre-aggregation data (one `ResultFrame` each for descriptions and distances) that every level above is aggregated from — `distances` covers models only (there's no such thing as the target's distance to itself); pair it with `result.target_distance_weights` if you're building custom distance aggregations of your own.
 
 Distances are in the range **0–1** (lower is better). A distance of `0.0` means the synthetic distribution perfectly matches observed; `1.0` is the maximum penalty.
 

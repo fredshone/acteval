@@ -17,12 +17,16 @@ Raw per-segment rows are collapsed upward in three steps:
 ``DEFAULT_REMOVE_FEATURES`` and ``DEFAULT_REMOVE_GROUPS`` (in ``_aggregation.py``)
 are hardcoded lists; update them if feature or group names change.
 
-## Output DataFrame structure
+## Output structure
 
-``descriptions`` and ``distances`` share the same MultiIndex
-``(domain, feature, segment)``. Columns are ``observed__weight``, ``observed``,
-then one column per model name plus a ``{model}__weight`` column for each.
-``unit`` is a string column carried alongside.
+``descriptions`` and ``distances`` are each a ``ResultFrame`` (see
+``_result_frame.py``): parallel ``values``/``weights`` DataFrames sharing the
+same MultiIndex ``(domain, feature, segment)`` and column set, plus a
+``units`` Series. ``descriptions`` has one column per model plus a ``"target"``
+column; ``distances`` has one column per model only (there's no such thing as
+the target's distance to itself) — the target's distance-side weight, used
+only to blend into each model's own weight before aggregating, is tracked
+separately (see ``Evaluator._target_distance_weights`` / ``EvalResult``).
 
 ## ``missing_distance``
 
@@ -50,33 +54,30 @@ def add_stats(data: DataFrame, columns: dict[str, DataFrame]):
 
 
 def _aggregate_features(
-    descriptions: DataFrame,
-    distances: DataFrame,
+    descriptions: ResultFrame,
+    distances: ResultFrame,
+    target_weights: Series,
     extra: list[str] = [],
 ) -> tuple[DataFrame, DataFrame]:
     """Tier 1: collapse per-segment rows into one row per (domain, feature, segment[, ...]).
 
-    Uses ``ResultFrame`` internally to avoid fragile suffix-based column
-    filtering; the returned DataFrames preserve the existing schema
-    (values + unit, no weight columns).
-
     Args:
+        target_weights: Raw target distance weights, for blending into each
+            model's weight before aggregating distances.
         extra: Additional index levels to preserve after aggregation,
             e.g. ``["label"]`` or ``["label", "cat"]`` for split-aware output.
     """
     grouper = ["domain", "feature", "segment"] + extra
 
-    desc_rf = ResultFrame.from_wide(descriptions)
-    feat_desc_rf = desc_rf.aggregate(grouper)
+    feat_desc_rf = descriptions.aggregate(grouper)
     feat_desc = feat_desc_rf.values.copy()
     if feat_desc_rf.units is not None:
         feat_desc["unit"] = feat_desc_rf.units
 
-    dist_rf = ResultFrame.from_wide(distances)
-    feat_dist_rf = dist_rf.aggregate_distances(grouper)
+    feat_dist_rf = distances.aggregate_distances(grouper, target_weights=target_weights)
     feat_dist = feat_dist_rf.values.copy()
-    # unit comes from descriptions (distances have no observed description values)
-    feat_dist["unit"] = descriptions["unit"].groupby(level=grouper).first()
+    # unit comes from descriptions (distances have no target description values)
+    feat_dist["unit"] = descriptions.units.groupby(level=grouper).first()
 
     return feat_desc, feat_dist
 
@@ -89,22 +90,24 @@ _PARALLEL_THRESHOLD = 50
 # ---------------------------------------------------------------------------
 
 
-def _observed_base(spec: JobSpec, observed_features: dict) -> tuple[DataFrame, tuple]:
-    """Build the observed-only base rows for a feature spec.
+def _observed_base(
+    spec: JobSpec, observed_features: dict
+) -> tuple[Series, Series, tuple]:
+    """Build the target-only base rows for a feature spec.
 
-    Returns (base_df, default) where base_df has columns {observed__weight,
-    observed} with a flat segment index sorted by weight descending.
-    The MultiIndex is NOT set here; the caller sets it after stacking specs.
+    Returns (value, weight, default): parallel Series with a flat segment
+    index, sorted by weight then value descending. The MultiIndex is NOT set
+    here; the caller sets it after stacking specs.
     """
     default = _make_default(observed_features)
-    observed_weight = spec.size_fn(observed_features)
-    observed_weight.name = "observed__weight"
-    description_observed = spec.describe_fn(observed_features)
-    base = DataFrame(
-        {"observed__weight": observed_weight, "observed": description_observed}
+    weight = spec.size_fn(observed_features)
+    value = spec.describe_fn(observed_features)
+    order = (
+        DataFrame({"weight": weight, "value": value})
+        .sort_values(ascending=False, by=["weight", "value"])
+        .index
     )
-    base = base.sort_values(ascending=False, by=["observed__weight", "observed"])
-    return base, default
+    return value.reindex(order), weight.reindex(order), default
 
 
 def _model_contribution(
@@ -116,7 +119,6 @@ def _model_contribution(
 ) -> tuple[Series, Series, Series]:
     """Compute weight, description, and distance columns for one model × one spec."""
     synth_weight = spec.size_fn(synth_features)
-    synth_weight.name = f"{model}__weight"
     desc = _describe_feature(model, synth_features, spec.describe_fn)
     dist = _score_features(
         model,
@@ -138,19 +140,24 @@ def _observed_base_creativity(
     target_schedules: DataFrame,
     observed_hash: set,
     config: CreativityConfig,
-) -> tuple[DataFrame, DataFrame]:
-    """Build observed base rows for enabled creativity metrics.
+) -> tuple[Series, Series, Series, Series, Series]:
+    """Build target base rows for enabled creativity metrics.
 
     Args:
         target_schedules: Observed schedule DataFrame.
         observed_hash: Pre-computed population hash set for this split/cat.
         config: Controls which creativity rows to produce.
+
+    Returns:
+        (desc_value, desc_weight, desc_unit, dist_weight, dist_unit) — all
+        Series sharing the same (domain, feature, segment) index. There is no
+        ``dist_value``: the target has no distance to itself.
     """
     obs_diversity = creativity.diversity(target_schedules, observed_hash)
     n = target_schedules.pid.nunique()
     names = ["domain", "feature", "segment"]
     desc_idx, desc_weight, desc_val, desc_unit = [], [], [], []
-    dist_idx, dist_weight, dist_val, dist_unit = [], [], [], []
+    dist_idx, dist_weight, dist_unit = [], [], []
 
     if config.diversity:
         desc_idx.append(("creativity", "diversity", "all"))
@@ -159,7 +166,6 @@ def _observed_base_creativity(
         desc_unit.append("prob. unique")
         dist_idx.append(("creativity", "homogeneity", "all"))
         dist_weight.append(n)
-        dist_val.append(1 - obs_diversity)
         dist_unit.append("prob. not unique")
     if config.novelty:
         desc_idx.append(("creativity", "novelty", "all"))
@@ -168,18 +174,17 @@ def _observed_base_creativity(
         desc_unit.append("prob. novel")
         dist_idx.append(("creativity", "conservatism", "all"))
         dist_weight.append(n)
-        dist_val.append(0)
         dist_unit.append("prob. conservative")
 
-    base_desc = DataFrame(
-        {"observed__weight": desc_weight, "observed": desc_val, "unit": desc_unit},
-        index=MultiIndex.from_tuples(desc_idx, names=names),
+    desc_index = MultiIndex.from_tuples(desc_idx, names=names)
+    dist_index = MultiIndex.from_tuples(dist_idx, names=names)
+    return (
+        Series(desc_val, index=desc_index),
+        Series(desc_weight, index=desc_index),
+        Series(desc_unit, index=desc_index),
+        Series(dist_weight, index=dist_index),
+        Series(dist_unit, index=dist_index),
     )
-    base_dist = DataFrame(
-        {"observed__weight": dist_weight, "observed": dist_val, "unit": dist_unit},
-        index=MultiIndex.from_tuples(dist_idx, names=names),
-    )
-    return base_desc, base_dist
 
 
 def _model_cols_creativity(
@@ -188,7 +193,7 @@ def _model_cols_creativity(
     sample_pids,
     observed_hash: set,
     config: CreativityConfig,
-) -> tuple[DataFrame, DataFrame]:
+) -> tuple[Series, Series, Series, Series]:
     """Compute creativity columns for one model using pre-computed per-pid hashes.
 
     Args:
@@ -197,6 +202,9 @@ def _model_cols_creativity(
         sample_pids: Pid values for this (split, cat) subset.
         observed_hash: Pre-cached hash set for this (split, cat) target subset.
         config: Controls which creativity rows to produce.
+
+    Returns:
+        (desc_value, desc_weight, dist_value, dist_weight) — parallel Series.
     """
     y_hash = {pid_hashes[p] for p in sample_pids if p in pid_hashes}
     y_count = len(sample_pids)
@@ -221,15 +229,14 @@ def _model_cols_creativity(
         dist_weight.append(y_count)
         dist_val.append(1 - y_novelty)
 
-    desc = DataFrame(
-        {f"{model}__weight": desc_weight, model: desc_val},
-        index=MultiIndex.from_tuples(desc_idx, names=names),
+    desc_index = MultiIndex.from_tuples(desc_idx, names=names)
+    dist_index = MultiIndex.from_tuples(dist_idx, names=names)
+    return (
+        Series(desc_val, index=desc_index, name=model),
+        Series(desc_weight, index=desc_index, name=model),
+        Series(dist_val, index=dist_index, name=model),
+        Series(dist_weight, index=dist_index, name=model),
     )
-    dist = DataFrame(
-        {f"{model}__weight": dist_weight, model: dist_val},
-        index=MultiIndex.from_tuples(dist_idx, names=names),
-    )
-    return desc, dist
 
 
 # ---------------------------------------------------------------------------
@@ -239,23 +246,26 @@ def _model_cols_creativity(
 
 def _observed_base_structural(
     target_schedules: DataFrame, config: StructuralConfig
-) -> DataFrame:
-    """Build observed base rows for enabled structural (feasibility) metrics.
+) -> tuple[Series, Series, Series]:
+    """Build target base rows for enabled structural (feasibility) metrics.
 
-    Novel-scoped rows use ``observed = 0`` (by definition the observed population
+    Novel-scoped rows use ``value = 0`` (by definition the observed population
     has no novel schedules).
+
+    Returns:
+        (value, weight, unit) — parallel Series.
     """
-    parts = []
+    value_parts, weight_parts, unit_parts = [], [], []
     if config.home_based or config.consecutive:
         w, m = structural.feasibility_eval(
             Population(target_schedules),
-            name="observed",
+            name="target",
             home_based=config.home_based,
             consecutive=config.consecutive,
         )
-        base = concat([w, m], axis=1)
-        base["unit"] = "prob. infeasible"
-        parts.append(base)
+        value_parts.append(m)
+        weight_parts.append(w)
+        unit_parts.append(Series("prob. infeasible", index=m.index))
     if config.home_based_novel or config.consecutive_novel:
         idx = structural.feasibility_index(
             home_based=config.home_based_novel,
@@ -263,16 +273,10 @@ def _observed_base_structural(
             suffix=" (novel)",
         )
         n = target_schedules.pid.nunique()
-        novel_base = DataFrame(
-            {
-                "observed__weight": [n] * len(idx),
-                "observed": [0.0] * len(idx),
-                "unit": "prob. infeasible",
-            },
-            index=idx,
-        )
-        parts.append(novel_base)
-    return concat(parts)
+        value_parts.append(Series([0.0] * len(idx), index=idx))
+        weight_parts.append(Series([n] * len(idx), index=idx))
+        unit_parts.append(Series(["prob. infeasible"] * len(idx), index=idx))
+    return concat(value_parts), concat(weight_parts), concat(unit_parts)
 
 
 def _model_cols_structural(
@@ -281,7 +285,7 @@ def _model_cols_structural(
     synth_dense_pids,
     novel_dense_pids,
     config: StructuralConfig,
-) -> DataFrame:
+) -> tuple[Series, Series]:
     """Compute structural columns for one model using pre-computed per-pid flags.
 
     Args:
@@ -292,8 +296,11 @@ def _model_cols_structural(
         novel_dense_pids: Dense pid indices for novel persons only (may be None
             if ``config.needs_novel_pids`` is False).
         config: Controls which structural rows to produce.
+
+    Returns:
+        (value, weight) — parallel Series (empty if nothing is enabled).
     """
-    parts = []
+    value_parts, weight_parts = [], []
     if config.home_based or config.consecutive:
         w, m = structural.feasibility_aggregate(
             per_pid_flags,
@@ -302,7 +309,8 @@ def _model_cols_structural(
             home_based=config.home_based,
             consecutive=config.consecutive,
         )
-        parts.append(concat([w, m], axis=1))
+        value_parts.append(m)
+        weight_parts.append(w)
     if config.home_based_novel or config.consecutive_novel:
         w, m = structural.feasibility_aggregate(
             per_pid_flags,
@@ -312,8 +320,11 @@ def _model_cols_structural(
             consecutive=config.consecutive_novel,
             suffix=" (novel)",
         )
-        parts.append(concat([w, m], axis=1))
-    return concat(parts) if parts else DataFrame()
+        value_parts.append(m)
+        weight_parts.append(w)
+    if not value_parts:
+        return Series(dtype=float), Series(dtype=float)
+    return concat(value_parts), concat(weight_parts)
 
 
 def _describe_feature(

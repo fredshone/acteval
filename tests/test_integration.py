@@ -58,25 +58,19 @@ class TestNoSplitsSchema:
         result = compare(observed, {"m": synthetic})
         assert "m" in result.features.combined.distances.columns
 
-    def test_features_combined_descriptions_has_observed(self, observed, synthetic):
+    def test_features_combined_descriptions_has_target(self, observed, synthetic):
         result = compare(observed, {"m": synthetic})
-        assert "observed" in result.features.combined.descriptions.columns
+        assert "target" in result.features.combined.descriptions.columns
         assert "m" in result.features.combined.descriptions.columns
 
-    def test_no_weight_columns_in_distances(self, observed, synthetic):
+    def test_distances_columns_are_model_and_unit_only(self, observed, synthetic):
         result = compare(observed, {"m": synthetic})
-        assert not any(
-            c.endswith("__weight") for c in result.features.combined.distances.columns
-        )
-        assert not any(
-            c.endswith("__weight") for c in result.groups.combined.distances.columns
-        )
+        assert set(result.features.combined.distances.columns) == {"m", "unit"}
+        assert set(result.groups.combined.distances.columns) == {"m", "unit"}
 
-    def test_domains_no_weight_or_unit_columns(self, observed, synthetic):
+    def test_domains_distances_columns_are_model_only(self, observed, synthetic):
         result = compare(observed, {"m": synthetic})
-        cols = set(result.domains.combined.distances.columns)
-        assert not any(c.endswith("__weight") for c in cols)
-        assert "unit" not in cols
+        assert set(result.domains.combined.distances.columns) == {"m"}
 
     def test_domains_distances_values_in_range(self, observed, synthetic):
         result = compare(observed, {"m": synthetic})
@@ -136,7 +130,7 @@ class TestNoSplitsSchema:
     def test_summary_returns_model_columns_only(self, observed, synthetic):
         result = compare(observed, {"m": synthetic})
         summary = result.summary()
-        assert "observed" not in summary.columns
+        assert "target" not in summary.columns
         assert "m" in summary.columns
 
     def test_split_access_raises_without_splits(self, observed, synthetic):

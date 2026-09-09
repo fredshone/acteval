@@ -9,24 +9,13 @@ with every model column namespaced by its target so nothing collides.
 
 from pandas import DataFrame, concat
 
+from acteval._result_frame import ResultFrame
 from acteval.evaluate import EvalResult, compare
 
-_BASE_COLS = {"observed", "observed__weight", "unit"}
 
-
-def _model_columns(df: DataFrame, name: str) -> DataFrame:
-    """Return df's non-base columns, renamed with a `"{name}::"` prefix so
-    models from different sources never collide."""
-    cols = [c for c in df.columns if c not in _BASE_COLS]
-    renamed = {
-        c: (
-            f"{name}::{c[: -len('__weight')]}__weight"
-            if c.endswith("__weight")
-            else f"{name}::{c}"
-        )
-        for c in cols
-    }
-    return df[cols].rename(columns=renamed)
+def _renamed(df: DataFrame, name: str, columns: list[str]) -> DataFrame:
+    """Select `columns` from df, each renamed with a `"{name}::"` prefix."""
+    return df[columns].rename(columns={c: f"{name}::{c}" for c in columns})
 
 
 def combine(results: dict[str, EvalResult]) -> EvalResult:
@@ -37,14 +26,13 @@ def combine(results: dict[str, EvalResult]) -> EvalResult:
     so models from different sources stay distinct in `model_names` /
     `summary()` / `rank_models()`.
 
-    The shared `observed`/`observed__weight`/`unit` columns are taken from
-    the *first* result only. Every model's distances were already computed
-    against its own source's target, so this only affects which weights are
-    used when re-aggregating a non-first source's columns from features to
-    groups to domains — a known simplification for now, not an error in the
-    distances themselves. A future refactor could carry one base per source
-    (e.g. `EvalResult.raw_base_distances: dict[str, DataFrame]`) to remove
-    this limitation.
+    The target's own values/weights are taken from the *first* result only.
+    Every model's distances were already computed against its own source's
+    target, so this only affects which weights are used when re-aggregating
+    a non-first source's columns from features to groups to domains — a
+    known simplification for now, not an error in the distances themselves.
+    A future refactor could carry one target per source to remove this
+    limitation.
 
     Args:
         results: `{source_name: EvalResult}`, e.g. one entry per target.
@@ -71,23 +59,58 @@ def combine(results: dict[str, EvalResult]) -> EvalResult:
             f"({has_splits}); align split_on across all inputs before combining"
         )
 
-    base_result = results[names[0]]
-    base_desc = base_result._raw_desc[
-        [c for c in base_result._raw_desc.columns if c in _BASE_COLS]
-    ]
-    base_dist = base_result._raw_dist[
-        [c for c in base_result._raw_dist.columns if c in _BASE_COLS]
-    ]
+    base = results[names[0]]
 
-    raw_desc = concat(
-        [base_desc] + [_model_columns(r._raw_desc, n) for n, r in results.items()],
+    desc_values = concat(
+        [base.raw["descriptions"].values[["target"]]]
+        + [
+            _renamed(r.raw["descriptions"].values, n, r.model_names)
+            for n, r in results.items()
+        ],
         axis=1,
     )
-    raw_dist = concat(
-        [base_dist] + [_model_columns(r._raw_dist, n) for n, r in results.items()],
+    desc_weights = concat(
+        [base.raw["descriptions"].weights[["target"]]]
+        + [
+            _renamed(r.raw["descriptions"].weights, n, r.model_names)
+            for n, r in results.items()
+        ],
         axis=1,
     )
-    return EvalResult(raw_desc=raw_desc, raw_dist=raw_dist)
+    dist_values = concat(
+        [
+            _renamed(r.raw["distances"].values, n, r.model_names)
+            for n, r in results.items()
+        ],
+        axis=1,
+    )
+    dist_weights = concat(
+        [
+            _renamed(r.raw["distances"].weights, n, r.model_names)
+            for n, r in results.items()
+        ],
+        axis=1,
+    )
+
+    # Sources may cover different rows (e.g. different activities present in
+    # different targets) — reindex base's units to the merged row set so they
+    # line up positionally with values/weights (missing rows become NaN, same
+    # as any other source's non-overlapping row already does via the concat).
+    descriptions = ResultFrame(
+        values=desc_values,
+        weights=desc_weights,
+        units=base.raw["descriptions"].units.reindex(desc_values.index),
+    )
+    distances = ResultFrame(
+        values=dist_values,
+        weights=dist_weights,
+        units=base.raw["distances"].units.reindex(dist_values.index),
+    )
+    return EvalResult(
+        descriptions=descriptions,
+        distances=distances,
+        target_distance_weights=base.target_distance_weights.reindex(dist_values.index),
+    )
 
 
 def compare_many(
@@ -115,7 +138,7 @@ def compare_many(
 
     Returns:
         A single combined `EvalResult`; see `combine()` for details and the
-        known base-column limitation.
+        known target-weight-base limitation.
     """
     results = {
         name: compare(

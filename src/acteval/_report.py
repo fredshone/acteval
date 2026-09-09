@@ -8,7 +8,7 @@ def print_markdown(data: DataFrame):
 
 
 def rank(data: DataFrame) -> DataFrame:
-    r = data.drop(["observed", "unit"], axis=1, errors="ignore").rank(
+    r = data.drop(["target", "unit"], axis=1, errors="ignore").rank(
         axis=1, method="min"
     )
     col_ranks = r.sum(axis=0)
