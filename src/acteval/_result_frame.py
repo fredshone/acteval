@@ -101,7 +101,7 @@ class ResultFrame:
             combined_w = (self.weights[col] + target_weights) / 2
             total = combined_w.groupby(groupby).sum()
             weighted = (self.values[col].mul(combined_w)).groupby(groupby).sum()
-            agg_values[col] = weighted / total
+            agg_values[col] = (weighted / total).fillna(0.0)
             agg_weights[col] = total
         units = self.units.groupby(groupby).first() if self.units is not None else None
         return ResultFrame(
