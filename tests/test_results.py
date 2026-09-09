@@ -1,3 +1,5 @@
+import warnings
+
 import pytest
 from pandas import DataFrame
 
@@ -43,6 +45,31 @@ def test_combine_mismatched_split_shape_raises(observed, synthetic, observed_b):
     )
     with pytest.raises(ValueError, match="cannot mix results"):
         combine({"t1": plain, "t2": split})
+
+
+def test_combine_warns_on_mismatched_row_index(observed, synthetic, observed_b):
+    r1 = compare(observed, {"m": synthetic})
+    r2 = compare(observed_b, {"m": synthetic})
+    with pytest.warns(UserWarning, match="row index differs"):
+        combine({"t1": r1, "t2": r2})
+
+
+def test_combine_no_warning_when_rows_match(observed, synthetic):
+    r1 = compare(observed, {"m": synthetic})
+    r2 = compare(observed, {"m": synthetic})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        combine({"t1": r1, "t2": r2})
+
+
+def test_combine_distances_have_no_nan(observed, synthetic, observed_b):
+    r1 = compare(observed, {"m": synthetic})
+    r2 = compare(observed_b, {"m": synthetic})
+    combined = combine({"t1": r1, "t2": r2})
+    assert not combined.summary().isna().any().any()
+    assert (
+        not combined.features.combined.distances.drop(columns="unit").isna().any().any()
+    )
 
 
 def test_combine_namespaces_model_columns(observed, synthetic, observed_b):

@@ -984,18 +984,23 @@ class Evaluator:
             | self.collected_description_values,
             axis=1,
         )
+        # Weights are counts: a row one side doesn't cover (e.g. a model uses
+        # an activity absent from the target) means zero observations there,
+        # not an unknown value — fillna(0.0) so aggregate()/aggregate_distances()
+        # treat it as real zero-weight rather than NaN propagating through the
+        # weighted-average arithmetic.
         desc_weights = concat(
             {"target": self._target_description_weights}
             | self.collected_description_weights,
             axis=1,
-        )
+        ).fillna(0.0)
         dist_values = concat(self.collected_distance_values, axis=1)
-        dist_weights = concat(self.collected_distance_weights, axis=1)
-        # The concatenated values/weights DataFrames may have more rows than
-        # the target-only Series below (e.g. a model uses an activity absent
-        # from the target) — reindex so every attached Series matches the
-        # final row set (missing rows become NaN, same as the value/weight
-        # columns above already do via the outer-join concat).
+        dist_weights = concat(self.collected_distance_weights, axis=1).fillna(0.0)
+        # The concatenated values DataFrames may have more rows than the
+        # target-only Series below (e.g. a model uses an activity absent from
+        # the target) — reindex so every attached Series matches the final row
+        # set. Units become NaN for such rows (informational only); the
+        # weight becomes 0 (a real zero-weight row, not a missing one).
         descriptions = ResultFrame(
             values=desc_values,
             weights=desc_weights,
@@ -1010,7 +1015,7 @@ class Evaluator:
             descriptions=descriptions,
             distances=distances,
             target_distance_weights=self._target_distance_weights.reindex(
-                dist_values.index
+                dist_values.index, fill_value=0.0
             ),
         )
 

@@ -7,6 +7,8 @@ call per target and `combine()`s the results into a single `EvalResult`,
 with every model column namespaced by its target so nothing collides.
 """
 
+import warnings
+
 from pandas import DataFrame, concat
 
 from acteval._result_frame import ResultFrame
@@ -61,6 +63,26 @@ def combine(results: dict[str, EvalResult]) -> EvalResult:
 
     base = results[names[0]]
 
+    mismatched = [
+        name
+        for name, r in results.items()
+        if not r.raw["descriptions"].values.index.equals(
+            base.raw["descriptions"].values.index
+        )
+        or not r.raw["distances"].values.index.equals(
+            base.raw["distances"].values.index
+        )
+    ]
+    if mismatched:
+        warnings.warn(
+            f"combine(): row index differs from {names[0]!r} for source(s) "
+            f"{mismatched} (e.g. different activities present in different "
+            "targets). Aggregation weighting for non-first sources is "
+            "approximate — see combine()'s docstring.",
+            UserWarning,
+            stacklevel=2,
+        )
+
     desc_values = concat(
         [base.raw["descriptions"].values[["target"]]]
         + [
@@ -69,6 +91,10 @@ def combine(results: dict[str, EvalResult]) -> EvalResult:
         ],
         axis=1,
     )
+    # Weights are counts: a row one source doesn't cover means zero
+    # observations there, not an unknown value — fillna(0.0) so
+    # aggregate()/aggregate_distances() treat it as real zero-weight rather
+    # than NaN propagating through the weighted-average arithmetic.
     desc_weights = concat(
         [base.raw["descriptions"].weights[["target"]]]
         + [
@@ -76,7 +102,7 @@ def combine(results: dict[str, EvalResult]) -> EvalResult:
             for n, r in results.items()
         ],
         axis=1,
-    )
+    ).fillna(0.0)
     dist_values = concat(
         [
             _renamed(r.raw["distances"].values, n, r.model_names)
@@ -90,12 +116,13 @@ def combine(results: dict[str, EvalResult]) -> EvalResult:
             for n, r in results.items()
         ],
         axis=1,
-    )
+    ).fillna(0.0)
 
     # Sources may cover different rows (e.g. different activities present in
     # different targets) — reindex base's units to the merged row set so they
-    # line up positionally with values/weights (missing rows become NaN, same
-    # as any other source's non-overlapping row already does via the concat).
+    # line up positionally with values/weights. Units become NaN for such
+    # rows (informational only); target_distance_weights becomes 0 (a real
+    # zero-weight row, not a missing one).
     descriptions = ResultFrame(
         values=desc_values,
         weights=desc_weights,
@@ -109,7 +136,9 @@ def combine(results: dict[str, EvalResult]) -> EvalResult:
     return EvalResult(
         descriptions=descriptions,
         distances=distances,
-        target_distance_weights=base.target_distance_weights.reindex(dist_values.index),
+        target_distance_weights=base.target_distance_weights.reindex(
+            dist_values.index, fill_value=0.0
+        ),
     )
 
 

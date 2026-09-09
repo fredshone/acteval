@@ -1,4 +1,5 @@
 import pytest
+from pandas import DataFrame
 
 from acteval.evaluate import Evaluator, compare
 
@@ -67,3 +68,26 @@ def test_at_invalid_split_raises_value_error(observed, synthetic):
     result = compare(observed, synthetic)
     with pytest.raises(ValueError, match="split"):
         result.at(split="not_a_split")
+
+
+def test_models_with_different_activity_coverage_have_no_nan_distances(
+    observed, synthetic
+):
+    """One model does an activity absent from both the target and the other
+    model — the resulting asymmetric weight coverage must not produce NaN."""
+    other = DataFrame(
+        [
+            {"pid": 0, "act": "home", "start": 0, "end": 6, "duration": 6},
+            {"pid": 0, "act": "leisure", "start": 6, "end": 14, "duration": 8},
+            {"pid": 0, "act": "home", "start": 14, "end": 24, "duration": 10},
+            {"pid": 1, "act": "home", "start": 0, "end": 12, "duration": 12},
+            {"pid": 1, "act": "work", "start": 12, "end": 24, "duration": 12},
+        ]
+    )
+    result = compare(observed, {"m1": synthetic, "m2": other})
+    # Aggregated (group/domain) distances resolve to real numbers via
+    # zero-weighted rows, not NaN. The raw per-segment "features" level may
+    # still show NaN for a segment a given model has literally no data for
+    # (e.g. m1's "home+leisure" pair rate) — that's informational, not a bug.
+    assert not result.domains.combined.distances.isna().any().any()
+    assert not result.groups.combined.distances.drop(columns="unit").isna().any().any()
