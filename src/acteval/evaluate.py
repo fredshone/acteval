@@ -634,6 +634,10 @@ class Evaluator:
         # These are the target's contribution to the final ResultFrames that
         # compare_population/report will build by concatenating model columns
         # alongside them.
+        if not desc_value_parts:
+            raise ValueError(
+                "No evaluation jobs are enabled (check config/disable); nothing to report."
+            )
         self._target_description_values = concat(desc_value_parts)
         self._target_description_weights = concat(desc_weight_parts)
         self._target_description_units = concat(desc_unit_parts)
