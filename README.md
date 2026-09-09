@@ -158,6 +158,58 @@ disable=[...])` and the CLI's `--disable` flag; for anything more involved than 
 metric or two, pass a custom `config_path` or a pre-built `jobs` (`EvalConfig`)
 instead.
 
+#### Comparing against multiple targets
+
+`compare()`/`Evaluator` compare N synthetic models against one target. To compare
+the *same* synthetic models against several targets (e.g. several observed
+populations) and see them side-by-side, use `acteval.results.compare_many()`:
+
+```python
+from acteval.results import compare_many
+
+result = compare_many(
+    {"target_a": observed_a, "target_b": observed_b},
+    {"model_1": synthetic_1, "model_2": synthetic_2},
+)
+```
+
+This runs one ordinary `compare()` call per target and merges the results into a
+single `EvalResult`, with model columns renamed `"{target_name}::{model_name}"` so
+nothing collides:
+
+```python
+print(result.model_names)
+# ['target_a::model_1', 'target_a::model_2', 'target_b::model_1', 'target_b::model_2']
+
+print(result.rank_models())
+# target_b::model_1    0.086425
+# target_a::model_1    0.188905
+# target_a::model_2    0.695448
+# target_b::model_2    0.702917
+# dtype: float64
+```
+
+For per-target attributes/`split_on`, or to inspect intermediate per-target
+results before merging, call `compare()` yourself in a loop and pass the results
+to `acteval.results.combine()`:
+
+```python
+from acteval.results import combine
+
+results = {
+    "target_a": compare(observed_a, synthetic),
+    "target_b": compare(observed_b, synthetic),
+}
+result = combine(results)
+```
+
+> **Known limitation:** the shared `observed`/`unit` columns underlying feature →
+> group → domain aggregation are taken from the *first* result only, so
+> re-aggregating a non-first target's columns uses that first target's weights
+> rather than its own. Each model's distances are still computed against its own
+> target — this only affects aggregation weighting, and will be resolved by a
+> future refactor to carry one weight base per source.
+
 ### Other entry points
 
 `compare()`/`Evaluator` cover population-level evaluation — the thing most users

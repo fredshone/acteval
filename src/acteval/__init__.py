@@ -14,6 +14,9 @@ __all__ = [
     "soft_dtw_spec",
 ]
 
+# Reachable as acteval.results.combine() / acteval.results.compare_many();
+# not hoisted into __all__ (mirrors acteval.plot).
+from acteval import results as results
 from acteval._jobs import list_disable_keys as list_disable_keys
 from acteval.evaluate import (
     AggregatedResult as AggregatedResult,
