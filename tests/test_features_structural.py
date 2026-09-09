@@ -1,5 +1,5 @@
 from numpy import array
-from pandas import DataFrame, MultiIndex, Series, concat
+from pandas import DataFrame, MultiIndex, Series
 
 from acteval._aggregation import (
     descriptions_to_domain_level,
@@ -8,6 +8,7 @@ from acteval._aggregation import (
     distances_to_group_level,
 )
 from acteval._pipeline import _aggregate_features
+from acteval._result_frame import ResultFrame
 from acteval.features._utils import equals
 from acteval.features.structural import (
     feasibility_eval,
@@ -16,20 +17,22 @@ from acteval.features.structural import (
 from acteval.population import Population
 
 
-def _describe(descriptions, distances):
+def _describe(
+    descriptions: ResultFrame, distances: ResultFrame, target_weights: Series
+):
     """Three-tier aggregation, mirroring what evaluate.py assembles internally."""
-    feat_desc, feat_dist = _aggregate_features(descriptions, distances)
+    feat_desc, feat_dist = _aggregate_features(descriptions, distances, target_weights)
     group_desc = descriptions_to_group_level(descriptions)
-    group_dist = distances_to_group_level(distances)
+    group_dist = distances_to_group_level(distances, target_weights)
     domain_desc = descriptions_to_domain_level(group_desc)
     domain_dist = distances_to_domain_level(group_dist)
     return {
         "descriptions": feat_desc,
         "distances": feat_dist,
-        "group_descriptions": group_desc,
-        "group_distances": group_dist,
-        "domain_descriptions": domain_desc,
-        "domain_distances": domain_dist,
+        "group_descriptions": group_desc.values,
+        "group_distances": group_dist.values,
+        "domain_descriptions": domain_desc.values,
+        "domain_distances": domain_dist.values,
     }
 
 
@@ -112,21 +115,21 @@ def test_describe_structural():
         names=["domain", "feature", "segment"],
     )
 
-    observed_weights = Series(
-        [3, 3, 3, 3, 3, 3, 3, 3], index=index, name="observed__weight"
+    weight = Series([3, 3, 3, 3, 3, 3, 3, 3], index=index)
+    value = Series([2 / 3, 1 / 3, 0, 1 / 3, 1 / 3, 1 / 3, 0, 0], index=index)
+    unit = Series(["prob. invalid"] * 8, index=index)
+
+    descriptions = ResultFrame(
+        values=DataFrame({"target": value, "y": value}),
+        weights=DataFrame({"target": weight, "y": weight}),
+        units=unit,
     )
-    observed_metrics = Series(
-        [2 / 3, 1 / 3, 0, 1 / 3, 1 / 3, 1 / 3, 0, 0],
-        index=index,
-        name="observed",
+    distances = ResultFrame(
+        values=DataFrame({"y": value}),
+        weights=DataFrame({"y": weight}),
+        units=unit,
     )
-    weights = Series([3, 3, 3, 3, 3, 3, 3, 3], index=index, name="y__weight")
-    metrics = Series(
-        [2 / 3, 1 / 3, 0, 1 / 3, 1 / 3, 1 / 3, 0, 0], index=index, name="y"
-    )
-    metrics = concat([observed_weights, observed_metrics, weights, metrics], axis=1)
-    metrics["unit"] = "prob. invalid"
-    frames = _describe(metrics, metrics)
+    frames = _describe(descriptions, distances, target_weights=weight)
     assert len(frames["descriptions"]) == 8
     assert len(frames["group_descriptions"]) == 3
     assert len(frames["domain_descriptions"]) == 1
@@ -159,13 +162,21 @@ def test_describe_splits_structural():
         names=["domain", "feature", "segment", "label"],
     )
 
-    observed_weights = Series([3] * 16, index=index, name="observed__weight")
-    observed_metrics = Series([1 / 3] * 16, index=index, name="observed")
-    weights = Series([3] * 16, index=index, name="y__weight")
-    metrics = Series([1 / 3, 0] * 8, index=index, name="y")
-    metrics = concat([observed_weights, observed_metrics, weights, metrics], axis=1)
-    metrics["unit"] = "prob. invalid"
-    frames = _describe(metrics, metrics)
+    weight = Series([3] * 16, index=index)
+    value = Series([1 / 3, 0] * 8, index=index)
+    unit = Series(["prob. invalid"] * 16, index=index)
+
+    descriptions = ResultFrame(
+        values=DataFrame({"target": value, "y": value}),
+        weights=DataFrame({"target": weight, "y": weight}),
+        units=unit,
+    )
+    distances = ResultFrame(
+        values=DataFrame({"y": value}),
+        weights=DataFrame({"y": weight}),
+        units=unit,
+    )
+    frames = _describe(descriptions, distances, target_weights=weight)
     assert len(frames["descriptions"]) == 8
     assert len(frames["group_descriptions"]) == 3
     assert len(frames["domain_descriptions"]) == 1
@@ -174,14 +185,14 @@ def test_describe_splits_structural():
     assert len(frames["group_distances"]) == 3
     assert len(frames["domain_distances"]) == 1
 
-    label_group_desc = descriptions_to_group_level(metrics, extra=["label"])
-    label_group_dist = distances_to_group_level(metrics, extra=["label"])
+    label_group_desc = descriptions_to_group_level(descriptions, extra=["label"])
+    label_group_dist = distances_to_group_level(distances, weight, extra=["label"])
     label_domain_desc = descriptions_to_domain_level(label_group_desc, extra=["label"])
     label_domain_dist = distances_to_domain_level(label_group_dist, extra=["label"])
-    assert len(metrics) == 16
-    assert len(label_group_desc) == 6
-    assert len(label_domain_desc) == 2
+    assert len(descriptions.values) == 16
+    assert len(label_group_desc.values) == 6
+    assert len(label_domain_desc.values) == 2
 
-    assert len(metrics) == 16
-    assert len(label_group_dist) == 6
-    assert len(label_domain_dist) == 2
+    assert len(distances.values) == 16
+    assert len(label_group_dist.values) == 6
+    assert len(label_domain_dist.values) == 2

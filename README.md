@@ -158,6 +158,58 @@ disable=[...])` and the CLI's `--disable` flag; for anything more involved than 
 metric or two, pass a custom `config_path` or a pre-built `jobs` (`EvalConfig`)
 instead.
 
+#### Comparing against multiple targets
+
+`compare()`/`Evaluator` compare N synthetic models against one target. To compare
+the *same* synthetic models against several targets (e.g. several observed
+populations) and see them side-by-side, use `acteval.results.compare_many()`:
+
+```python
+from acteval.results import compare_many
+
+result = compare_many(
+    {"target_a": observed_a, "target_b": observed_b},
+    {"model_1": synthetic_1, "model_2": synthetic_2},
+)
+```
+
+This runs one ordinary `compare()` call per target and merges the results into a
+single `EvalResult`, with model columns renamed `"{target_name}::{model_name}"` so
+nothing collides:
+
+```python
+print(result.model_names)
+# ['target_a::model_1', 'target_a::model_2', 'target_b::model_1', 'target_b::model_2']
+
+print(result.rank_models())
+# target_b::model_1    0.086425
+# target_a::model_1    0.188905
+# target_a::model_2    0.695448
+# target_b::model_2    0.702917
+# dtype: float64
+```
+
+For per-target attributes/`split_on`, or to inspect intermediate per-target
+results before merging, call `compare()` yourself in a loop and pass the results
+to `acteval.results.combine()`:
+
+```python
+from acteval.results import combine
+
+results = {
+    "target_a": compare(observed_a, synthetic),
+    "target_b": compare(observed_b, synthetic),
+}
+result = combine(results)
+```
+
+> **Known limitation:** the shared `target`/`unit` values underlying feature →
+> group → domain aggregation are taken from the *first* result only, so
+> re-aggregating a non-first target's columns uses that first target's weights
+> rather than its own. Each model's distances are still computed against its own
+> target — this only affects aggregation weighting, and will be resolved by a
+> future refactor to carry one weight base per source.
+
 ### Other entry points
 
 `compare()`/`Evaluator` cover population-level evaluation — the thing most users
@@ -256,7 +308,7 @@ result.at("domains", "by_category")      # domains × by_category   (requires sp
 
 `level` is one of `"features"`, `"groups"`, `"domains"` (most → least granular); `split` is one of `"combined"`, `"by_attribute"`, `"by_category"` (the latter two require `split_on` — see [Splitting by attribute](#splitting-by-attribute)). Each call returns an `AggregatedResult` with `.distances` and `.descriptions` DataFrames — the former is what feeds `summary()`/`rank_models()`, the latter carries descriptive stats (e.g. average start time) at the same index. Passing anything else raises `ValueError` listing the allowed values.
 
-`result.at(level, split)` is a thin dispatcher over chained properties of the same names — `result.at("groups", "by_attribute")` and `result.groups.by_attribute` return the exact same object, so use whichever reads better at the call site. `result.raw` exposes the pre-aggregation data (one `ResultFrame` each for descriptions and distances) that every level above is aggregated from; only needed if you're building custom aggregations of your own.
+`result.at(level, split)` is a thin dispatcher over chained properties of the same names — `result.at("groups", "by_attribute")` and `result.groups.by_attribute` return the exact same object, so use whichever reads better at the call site. `.descriptions` always includes a `"target"` column alongside each model's, showing the observed population's own value for comparison. `result.raw` exposes the pre-aggregation data (one `ResultFrame` each for descriptions and distances) that every level above is aggregated from — `distances` covers models only (there's no such thing as the target's distance to itself); pair it with `result.target_distance_weights` if you're building custom distance aggregations of your own.
 
 Distances are in the range **0–1** (lower is better). A distance of `0.0` means the synthetic distribution perfectly matches observed; `1.0` is the maximum penalty.
 

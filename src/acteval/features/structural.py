@@ -98,7 +98,7 @@ def feasibility_aggregate(
     n = len(dense_pid_subset)
     if n == 0:
         return (
-            Series([0] * len(idx), index=idx, name=f"{name}__weight", dtype=int),
+            Series([0] * len(idx), index=idx, name=name, dtype=int),
             Series([0] * len(idx), index=idx, name=name, dtype=float),
         )
 
@@ -126,7 +126,7 @@ def feasibility_aggregate(
         ]
 
     return (
-        Series([n] * len(idx), index=idx, name=f"{name}__weight", dtype=int),
+        Series([n] * len(idx), index=idx, name=name, dtype=int),
         Series(values, index=idx, name=name, dtype=float),
     )
 
@@ -150,7 +150,7 @@ def feasibility_eval(
     if population.is_empty:
         idx = feasibility_index(home_based, consecutive, suffix)
         return (
-            Series([0] * len(idx), index=idx, name=f"{name}__weight", dtype=int),
+            Series([0] * len(idx), index=idx, name=name, dtype=int),
             Series([0] * len(idx), index=idx, name=name, dtype=float),
         )
     flags = feasibility(population)
