@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788894744039,
+  "lastUpdate": 1788971513829,
   "repoUrl": "https://github.com/fredshone/acteval",
   "entries": {
     "Benchmark": [
@@ -1188,6 +1188,72 @@ window.BENCHMARK_DATA = {
             "unit": "iter/sec",
             "range": "stddev: 0.0006252063682162098",
             "extra": "mean: 188.17751666666283 msec\nrounds: 6"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "26383933+fredshone@users.noreply.github.com",
+            "name": "fredshone",
+            "username": "fredshone"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "27d7ab8b8e22bb45644376e7b2a2f9c9eb8cba4b",
+          "message": "implements compare_many (#8)\n\n* implements compare_many\n\n* refactors EvalResult to generalise for compare_many\n\n* fix null joins\n\n* Raise ValueError if no evaluation jobs are enabled\n\nCo-authored-by: Copilot Autofix powered by AI <175728472+Copilot@users.noreply.github.com>\n\n* Fill NaN values in aggregation with 0.0\n\nCo-authored-by: Copilot Autofix powered by AI <175728472+Copilot@users.noreply.github.com>\n\n---------\n\nCo-authored-by: Copilot Autofix powered by AI <175728472+Copilot@users.noreply.github.com>",
+          "timestamp": "2026-09-09T17:30:05+01:00",
+          "tree_id": "0d3bcfb2cf39a218d33b07886b3c89bce0c810a8",
+          "url": "https://github.com/fredshone/acteval/commit/27d7ab8b8e22bb45644376e7b2a2f9c9eb8cba4b"
+        },
+        "date": 1788971513199,
+        "tool": "pytest",
+        "benches": [
+          {
+            "name": "tests/test_bench_evaluate.py::test_bench_compare[1k]",
+            "value": 4.751844315514749,
+            "unit": "iter/sec",
+            "range": "stddev: 0.028377099562006017",
+            "extra": "mean: 210.4446050000007 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_bench_evaluate.py::test_bench_compare[20k]",
+            "value": 0.5133390572937991,
+            "unit": "iter/sec",
+            "range": "stddev: 0.014602234985329698",
+            "extra": "mean: 1.948030226399996 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_bench_evaluate.py::test_bench_compare[100k]",
+            "value": 0.10377860012810874,
+            "unit": "iter/sec",
+            "range": "stddev: 0.024205911189047802",
+            "extra": "mean: 9.6358979478 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_bench_pairwise.py::test_pairwise[N=256]",
+            "value": 82.81173958727602,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00015426261510620868",
+            "extra": "mean: 12.075582580246262 msec\nrounds: 81"
+          },
+          {
+            "name": "tests/test_bench_pairwise.py::test_pairwise[N=512]",
+            "value": 20.276609803211045,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0005039081701802939",
+            "extra": "mean: 49.317909142860664 msec\nrounds: 21"
+          },
+          {
+            "name": "tests/test_bench_pairwise.py::test_pairwise[N=1024]",
+            "value": 5.1363877187064535,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0010545188154035493",
+            "extra": "mean: 194.6893526666713 msec\nrounds: 6"
           }
         ]
       }
