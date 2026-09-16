@@ -242,7 +242,7 @@ def test_compare_split_by_attribute_runs():
     result = compare(
         observed,
         {"m": synthetic},
-        attributes={"m": synth_attrs},
+        synthetic_attributes={"m": synth_attrs},
         target_attributes=target_attrs,
         split_on=["gender"],
     )
@@ -283,7 +283,7 @@ def test_compare_split_by_attribute_two_models():
     result = compare(
         observed,
         {"m1": synthetic, "m2": synthetic2},
-        attributes={"m1": synth_attrs, "m2": synth_attrs},
+        synthetic_attributes={"m1": synth_attrs, "m2": synth_attrs},
         target_attributes=target_attrs,
         split_on=["gender"],
     )

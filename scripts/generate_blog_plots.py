@@ -17,6 +17,8 @@ import pandas as pd
 import seaborn as sns
 
 from acteval import compare
+from acteval.features.participation import sequence_lengths as sequence_lengths_feature
+from acteval.features.times import start_times_by_act_plan_enum
 from acteval.plot.plot import (
     _POPULATION_PALETTE,
     _save,
@@ -29,8 +31,6 @@ from acteval.plot.plot import (
 )
 from acteval.plot.results import groups, heatmap
 from acteval.plot.utils import PopulationGenerator
-from acteval.features.participation import sequence_lengths as sequence_lengths_feature
-from acteval.features.times import start_times_by_act_plan_enum
 from acteval.population import Population
 
 ACT_COLORS = {
@@ -279,7 +279,7 @@ def splits(
     result = compare(
         observed_df,
         {model_label: synthetic_df},
-        attributes={model_label: synthetic_attrs},
+        synthetic_attributes={model_label: synthetic_attrs},
         target_attributes=target_attrs,
         split_on=["work_status"],
     )
@@ -407,8 +407,8 @@ def main():
     print("\nRunning compare()...")
 
     result = compare(
-        observed=observed_pop,
-        synthetic=populations,
+        target_schedules=observed_pop,
+        synthetic_schedules=populations,
     )
     print(result)
 

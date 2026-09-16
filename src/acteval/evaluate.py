@@ -1,4 +1,4 @@
-"""Comparison entry points: Evaluator, compare(), compare_many().
+"""Comparison entry points: Evaluator, compare(), compare_grid(), compare_many().
 
 `EvalResult` and the classes/helpers it's built from live in `results.py`;
 this module is just the API surface that produces one.
@@ -654,10 +654,10 @@ class Evaluator:
 
 
 def compare(
-    observed: DataFrame,
-    synthetic,
-    attributes: dict[str, DataFrame] | None = None,
+    target_schedules: DataFrame,
+    synthetic_schedules,
     target_attributes: DataFrame | None = None,
+    synthetic_attributes: dict[str, DataFrame] | None = None,
     split_on: list[str] | None = None,
     verbose: bool = False,
     disable: list[str] | None = None,
@@ -670,12 +670,12 @@ def compare(
     use ``Evaluator`` directly so observed features are computed once.
 
     Args:
-        observed: Observed schedules with columns pid, act, start, end, duration.
-        synthetic: Single synthetic DataFrame or dict mapping model names to DataFrames.
-        attributes: Optional ``{model_name: attributes_df}`` with ``pid`` column.
-            If provided, enables attribute-based splitting (exposes ``label_*`` frames).
+        target_schedules: Observed schedules with columns pid, act, start, end, duration.
+        synthetic_schedules: Single synthetic DataFrame or dict mapping model names to DataFrames.
         target_attributes: Optional attributes DataFrame for ``observed``, with a
-            ``pid`` column.  Required together with ``split_on``.
+                    ``pid`` column.  Required together with ``split_on``.
+        synthetic_attributes: Optional ``{model_name: attributes_df}`` with ``pid`` column.
+            If provided, enables attribute-based splitting (exposes ``label_*`` frames).
         split_on: Optional attribute column(s) to split evaluation by (e.g.
             ``["gender"]``).  Requires ``target_attributes`` and ``attributes``.
         verbose: Print progress for each (split, category) subset.
@@ -693,23 +693,25 @@ def compare(
         EvalResult with raw segment-level data; use ``result.at(...)`` or the
         named properties for the aggregated output.
     """
-    if _is_dataframe(synthetic):
-        synthetic = {"synthetic": synthetic}
+    if _is_dataframe(synthetic_schedules):
+        synthetic_schedules = {"synthetic": synthetic_schedules}
     evaluator = Evaluator(
-        observed,
+        target_schedules,
         target_attributes=target_attributes,
         split_on=split_on,
         disable=disable,
         progress=progress,
     )
-    return evaluator.compare(synthetic, attributes=attributes, verbose=verbose)
+    return evaluator.compare(
+        synthetic_schedules, attributes=synthetic_attributes, verbose=verbose
+    )
 
 
-def compare_many(
-    targets: dict[str, DataFrame],
-    synthetic: dict[str, DataFrame],
-    attributes: dict[str, DataFrame] | None = None,
-    target_attributes: dict[str, DataFrame] | None = None,
+def compare_grid(
+    schedules_a: dict[str, DataFrame],
+    schedules_b: dict[str, DataFrame],
+    attributes_a: dict[str, DataFrame] | None = None,
+    attributes_b: dict[str, DataFrame] | None = None,
     split_on: list[str] | None = None,
     **kwargs,
 ) -> EvalResult:
@@ -720,11 +722,10 @@ def compare_many(
     model columns named `"{target_name}::{model_name}"`.
 
     Args:
-        targets: ``{target_name: observed_schedules_df}``.
-        synthetic: ``{model_name: schedules_df}``, compared against every target.
-        attributes: Optional ``{model_name: attributes_df}``, shared across targets.
-        target_attributes: Optional ``{target_name: attributes_df}`` — per-target
-            attributes, required together with ``split_on``.
+        schedules_a: ``{name: schedules_df}``.
+        schedules_b: ``{name: schedules_df}``, compared against every schedules in `schedules_a`.
+        attributes_a: Optional ``{name: attributes_df}``.
+        attributes_b: Optional ``{name: attributes_df}``.
         split_on: Optional attribute column(s) to split each target's evaluation by.
         **kwargs: Passed through to ``compare()`` (e.g. ``disable``, ``progress``).
 
@@ -734,15 +735,65 @@ def compare_many(
     """
     results = {
         name: compare(
-            target_df,
-            synthetic,
-            attributes=attributes,
-            target_attributes=(
-                target_attributes.get(name) if target_attributes else None
+            target_schedules=schedules,
+            synthetic_schedules=schedules_b,
+            target_attributes=(attributes_a.get(name) if attributes_a else None),
+            synthetic_attributes=attributes_b,
+            split_on=split_on,
+            **kwargs,
+        )
+        for name, schedules in schedules_a.items()
+    }
+    return combine(results)
+
+
+def compare_many(
+    schedules_a: dict[str, DataFrame],
+    schedules_b: dict[str, DataFrame],
+    attributes_a: dict[str, DataFrame] | None = None,
+    attributes_b: dict[str, DataFrame] | None = None,
+    split_on: list[str] | None = None,
+    **kwargs,
+) -> EvalResult:
+    """Compare each target against its corresponding synthetic model, pairwise.
+
+    ``schedules_a`` and ``schedules_b`` are paired up positionally (first with
+    first, second with second, ...) — unlike `compare_grid`, which compares
+    every target against every model. Runs one ordinary `compare()` call per
+    pair, then `combine()`s the results (see `acteval.results.combine`) into a
+    single `EvalResult` with model columns named `"{name_a}::{name_b}"`.
+
+    Args:
+        schedules_a: ``{name: schedules_df}``.
+        schedules_b: ``{name: schedules_df}``, compared pairwise against schedules in `schedules_a`
+            (paired by position — both dicts must have the same length).
+        attributes_a: Optional ``{name: attributes_df}``.
+        attributes_b: Optional ``{name: attributes_df}``.
+        split_on: Optional attribute column(s) to split each pair's evaluation by.
+        **kwargs: Passed through to ``compare()`` (e.g. ``disable``, ``progress``).
+
+    Returns:
+        A single combined ``EvalResult``; see ``acteval.results.combine`` for
+        details and the known target-weight-base limitation.
+    """
+    if len(schedules_a) != len(schedules_b):
+        raise ValueError(
+            "schedules_a and schedules_b must have the same length for a "
+            f"pairwise comparison; got {len(schedules_a)} and {len(schedules_b)}"
+        )
+    results = {
+        name_a: compare(
+            target_schedules=a,
+            synthetic_schedules={name_b: b},
+            target_attributes=(attributes_a.get(name_a) if attributes_a else None),
+            synthetic_attributes=(
+                {name_b: attributes_b[name_b]} if attributes_b else None
             ),
             split_on=split_on,
             **kwargs,
         )
-        for name, target_df in targets.items()
+        for (name_a, a), (name_b, b) in zip(
+            schedules_a.items(), schedules_b.items(), strict=True
+        )
     }
     return combine(results)

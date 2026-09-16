@@ -3,7 +3,7 @@ import warnings
 import pytest
 from pandas import DataFrame
 
-from acteval.evaluate import compare, compare_many
+from acteval.evaluate import compare, compare_grid, compare_many
 from acteval.results import combine
 
 
@@ -39,7 +39,7 @@ def test_combine_mismatched_split_shape_raises(observed, synthetic, observed_b):
     split = compare(
         observed_b,
         {"synthetic": synthetic},
-        attributes={"synthetic": synth_attrs},
+        synthetic_attributes={"synthetic": synth_attrs},
         target_attributes=obs_attrs,
         split_on=["group"],
     )
@@ -96,14 +96,14 @@ def test_combine_preserves_splits(observed, synthetic, observed_b):
     r1 = compare(
         observed,
         {"m": synthetic},
-        attributes={"m": synth_attrs},
+        synthetic_attributes={"m": synth_attrs},
         target_attributes=obs_attrs,
         split_on=["group"],
     )
     r2 = compare(
         observed_b,
         {"m": synthetic},
-        attributes={"m": synth_attrs},
+        synthetic_attributes={"m": synth_attrs},
         target_attributes=obs_attrs,
         split_on=["group"],
     )
@@ -127,18 +127,76 @@ def test_combine_save(tmp_path, observed, synthetic, observed_b):
     assert (tmp_path / "features" / "distances.csv").exists()
 
 
-def test_compare_many_matches_manual_combine(observed, synthetic, observed_b):
+def test_compare_grid_matches_manual_combine(observed, synthetic, observed_b):
     manual = combine(
         {
             "t1": compare(observed, {"m": synthetic}),
             "t2": compare(observed_b, {"m": synthetic}),
         }
     )
-    via_helper = compare_many({"t1": observed, "t2": observed_b}, {"m": synthetic})
+    via_helper = compare_grid({"t1": observed, "t2": observed_b}, {"m": synthetic})
     assert manual.summary().equals(via_helper.summary())
 
 
-def test_compare_many_with_evaluator_style_targets(observed, synthetic, observed_b):
-    result = compare_many({"t1": observed, "t2": observed_b}, {"m": synthetic})
+def test_compare_grid_with_evaluator_style_targets(observed, synthetic, observed_b):
+    result = compare_grid({"t1": observed, "t2": observed_b}, {"m": synthetic})
     assert set(result.model_names) == {"t1::m", "t2::m"}
     assert isinstance(result.rank_models().index[0], str)
+
+
+def test_compare_grid_is_full_cross_product(observed, synthetic, observed_b):
+    synthetic2 = DataFrame(
+        [
+            {"pid": 0, "act": "home", "start": 0, "end": 24, "duration": 24},
+        ]
+    )
+    result = compare_grid(
+        {"t1": observed, "t2": observed_b}, {"m1": synthetic, "m2": synthetic2}
+    )
+    assert set(result.model_names) == {"t1::m1", "t1::m2", "t2::m1", "t2::m2"}
+
+
+def test_compare_many_pairs_positionally(observed, synthetic, observed_b):
+    synthetic2 = DataFrame(
+        [
+            {"pid": 0, "act": "home", "start": 0, "end": 24, "duration": 24},
+        ]
+    )
+    result = compare_many(
+        {"t1": observed, "t2": observed_b}, {"m1": synthetic, "m2": synthetic2}
+    )
+    assert set(result.model_names) == {"t1::m1", "t2::m2"}
+
+
+def test_compare_many_matches_manual_combine(observed, synthetic, observed_b):
+    manual = combine(
+        {
+            "t1": compare(observed, {"m1": synthetic}),
+            "t2": compare(observed_b, {"m2": synthetic}),
+        }
+    )
+    via_helper = compare_many(
+        {"t1": observed, "t2": observed_b}, {"m1": synthetic, "m2": synthetic}
+    )
+    assert manual.summary().equals(via_helper.summary())
+
+
+def test_compare_many_mismatched_lengths_raises(observed, synthetic, observed_b):
+    with pytest.raises(ValueError, match="same length"):
+        compare_many({"t1": observed, "t2": observed_b}, {"m1": synthetic})
+
+
+def test_compare_many_passes_per_pair_attributes_and_split(
+    observed, synthetic, observed_b
+):
+    obs_attrs = DataFrame({"pid": [0, 1], "group": ["a", "b"]})
+    synth_attrs = DataFrame({"pid": [0, 1], "group": ["a", "b"]})
+    result = compare_many(
+        {"t1": observed, "t2": observed_b},
+        {"m1": synthetic, "m2": synthetic},
+        attributes_a={"t1": obs_attrs, "t2": obs_attrs},
+        attributes_b={"m1": synth_attrs, "m2": synth_attrs},
+        split_on=["group"],
+    )
+    assert set(result.model_names) == {"t1::m1", "t2::m2"}
+    assert result.has_splits is True

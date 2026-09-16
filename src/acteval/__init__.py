@@ -7,6 +7,7 @@ __all__ = [
     "SplitNotAvailableError",
     "chamfer_spec",
     "compare",
+    "compare_grid",
     "compare_many",
     "default_pairwise_specs",
     "list_disable_keys",
@@ -24,6 +25,9 @@ from acteval.evaluate import (
 )
 from acteval.evaluate import (
     compare as compare,
+)
+from acteval.evaluate import (
+    compare_grid as compare_grid,
 )
 from acteval.evaluate import (
     compare_many as compare_many,

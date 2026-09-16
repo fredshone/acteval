@@ -4,10 +4,10 @@ Holds the "result" side of the API: `EvalResult` (and the `ScheduleView` /
 `AggregatedResult` / `SplitNotAvailableError` classes it's built from), the
 index-tagging helpers `Evaluator` uses while assembling one, and `combine()`
 for merging several `EvalResult`s (e.g. one per target — see
-`Evaluator.compare_many()` in `evaluate.py`) into one.
+`compare_grid()`/`compare_many()` in `evaluate.py`) into one.
 
 The comparison entry points themselves (`Evaluator`, `compare()`,
-`compare_many()`) live in `evaluate.py`.
+`compare_grid()`, `compare_many()`) live in `evaluate.py`.
 """
 
 import warnings
@@ -408,10 +408,11 @@ def _renamed(df: DataFrame, name: str, columns: list[str]) -> DataFrame:
 def combine(results: dict[str, EvalResult]) -> EvalResult:
     """Combine EvalResults from separate compare() calls into one.
 
-    Typical use: comparing the same synthetic models against several targets
-    (see `Evaluator.compare_many`/`compare_many` in `evaluate.py`). Every
-    model column is renamed `"{source}::{model}"` so models from different
-    sources stay distinct in `model_names` / `summary()` / `rank_models()`.
+    Typical use: comparing the same synthetic models against several targets,
+    or pairing up targets and models one-to-one (see `compare_grid`/
+    `compare_many` in `evaluate.py`). Every model column is renamed
+    `"{source}::{model}"` so models from different sources stay distinct in
+    `model_names` / `summary()` / `rank_models()`.
 
     The target's own values/weights are taken from the *first* result only.
     Every model's distances were already computed against its own source's

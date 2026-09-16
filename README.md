@@ -113,7 +113,7 @@ progress bars while features are computed — useful for large populations.
 
 #### Splitting by attribute
 
-Pass `target_attributes` (for `observed`), `attributes` (per synthetic model), and `split_on` to evaluate separately within each category of an attribute (e.g. gender) instead of over the whole population — the Python equivalent of the CLI's `--split-on` flag:
+Pass `target_attributes` (for `observed`), `synthetic_attributes` (per synthetic model), and `split_on` to evaluate separately within each category of an attribute (e.g. gender) instead of over the whole population — the Python equivalent of the CLI's `--split-on` flag:
 
 ```python
 target_attrs = pd.DataFrame({"pid": [0, 1], "gender": ["M", "F"]})
@@ -122,7 +122,7 @@ synthetic_attributes = {"my_model": pd.DataFrame({"pid": [0, 1], "gender": ["M",
 result = compare(
     observed,
     {"my_model": synthetic},
-    attributes=synthetic_attributes,
+    synthetic_attributes=synthetic_attributes,
     target_attributes=target_attrs,
     split_on=["gender"],
 )
@@ -160,14 +160,20 @@ instead.
 
 #### Comparing against multiple targets
 
-`compare()`/`Evaluator` compare N synthetic models against one target. To compare
-the *same* synthetic models against several targets (e.g. several observed
-populations) and see them side-by-side, use `compare_many()`:
+`compare()`/`Evaluator` compare N synthetic models against one target. For more
+than one target, there are two helpers, depending on whether you want every
+target compared against every model (a grid) or targets and models paired up
+one-to-one:
+
+##### `compare_grid()` — every target × every model
+
+To compare the *same* synthetic models against several targets (e.g. several
+observed populations) and see them side-by-side, use `compare_grid()`:
 
 ```python
-from acteval import compare_many
+from acteval import compare_grid
 
-result = compare_many(
+result = compare_grid(
     {"target_a": observed_a, "target_b": observed_b},
     {"model_1": synthetic_1, "model_2": synthetic_2},
 )
@@ -189,9 +195,33 @@ print(result.rank_models())
 # dtype: float64
 ```
 
-For per-target attributes/`split_on`, or to inspect intermediate per-target
-results before merging, call `compare()` yourself in a loop and pass the results
-to `acteval.results.combine()`:
+##### `compare_many()` — targets and models paired one-to-one
+
+To compare each target against just its corresponding synthetic model — e.g.
+model 1 was fit against target A, model 2 against target B, and you want each
+scored only against its own target — use `compare_many()`. The two dicts are
+paired up positionally (first with first, second with second, ...) and must be
+the same length:
+
+```python
+from acteval import compare_many
+
+result = compare_many(
+    {"target_a": observed_a, "target_b": observed_b},
+    {"model_a": synthetic_a, "model_b": synthetic_b},
+)
+
+print(result.model_names)
+# ['target_a::model_a', 'target_b::model_b']
+```
+
+Both helpers accept `attributes_a`/`attributes_b` (per-target/per-model
+attributes DataFrames) and `split_on`, and pass any other keyword arguments
+(e.g. `disable`, `progress`) through to `compare()`.
+
+For per-target attributes/`split_on` with more control, or to inspect
+intermediate per-target results before merging, call `compare()` yourself in a
+loop and pass the results to `acteval.results.combine()`:
 
 ```python
 from acteval.results import combine
