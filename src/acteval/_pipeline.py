@@ -1,7 +1,7 @@
 """Evaluation pipeline: orchestrates job execution and aggregates results.
 
-This module is the core evaluation engine. ``evaluate.py`` is a thin public API
-that builds ``Population`` objects, calls the low-level helpers here to compute
+This module is the core evaluation engine. ``evaluate.py``'s ``Evaluator``
+builds ``Population`` objects, calls the low-level helpers here to compute
 per-feature rows, then aggregates them via ``_aggregation.py``.
 
 ## Three-tier aggregation
@@ -46,11 +46,6 @@ from acteval._jobs import CreativityConfig, JobSpec, StructuralConfig
 from acteval._result_frame import ResultFrame
 from acteval.features import creativity, structural
 from acteval.population import Population
-
-
-def add_stats(data: DataFrame, columns: dict[str, DataFrame]):
-    data["mean"] = data[columns].mean(axis=1)
-    data["std"] = data[columns].std(axis=1)
 
 
 def _aggregate_features(
