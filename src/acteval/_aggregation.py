@@ -18,7 +18,7 @@ Provides two groups of functions:
 
    Every function takes and returns a ``ResultFrame`` — callers extract
    ``.values``/``.units`` for the public-facing DataFrame once they've reached
-   whichever tier they need (see ``evaluate.py``'s ``ScheduleView``).
+   whichever tier they need (see ``results.py``'s ``ScheduleView``).
 
    The optional ``extra`` parameter appends additional index levels to the
    grouper — use ``extra=["label"]`` for split-stratified aggregation.

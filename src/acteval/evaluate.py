@@ -1,17 +1,18 @@
+"""Comparison entry points: Evaluator, compare(), compare_many().
+
+`EvalResult` and the classes/helpers it's built from live in `results.py`;
+this module is just the API surface that produces one.
+"""
+
 import warnings
-from functools import cached_property
-from pathlib import Path
-from typing import Literal
 
 import numpy as np
 import pandas as pd
-from pandas import DataFrame, MultiIndex, Series, concat
+from pandas import DataFrame, Series, concat
 
-from acteval._aggregation import DEFAULT_REMOVE_FEATURES, DEFAULT_REMOVE_GROUPS
 from acteval._compat import _coerce_to_pandas, _is_dataframe
 from acteval._jobs import EvalConfig, get_jobs
 from acteval._pipeline import (
-    _aggregate_features,
     _make_default,
     _model_cols_creativity,
     _model_cols_structural,
@@ -27,384 +28,12 @@ from acteval._result_frame import ResultFrame
 from acteval._splits import _key_activities
 from acteval.features import creativity, structural
 from acteval.population import Population
-
-
-def _append_split_cat_index(
-    data: DataFrame | Series, split: str, cat
-) -> DataFrame | Series:
-    """Append ``(split, cat)`` as trailing ``label``/``cat`` MultiIndex levels.
-
-    Shared by creativity and structural rows, whose index already has its
-    final shape (domain, feature, segment, ...) before this split/category
-    tag is added. Works on a ``DataFrame`` or a ``Series``.
-    """
-    data.index = MultiIndex.from_tuples(
-        [(*i, split, cat) for i in data.index],
-        names=list(data.index.names) + ["label", "cat"],
-    )
-    return data
-
-
-def _tag_density_index(
-    data: DataFrame | Series, domain: str, feature: str, split: str, cat
-) -> DataFrame | Series:
-    """Turn a flat segment index into (domain, feature, segment, label, cat).
-
-    Density rows start with only a flat ``segment`` index (unlike creativity/
-    structural, which already carry ``domain``/``feature``/``segment``), so
-    this injects the two leading levels alongside the split/category tag.
-    Works on a ``DataFrame`` or a ``Series``.
-    """
-    data.index = MultiIndex.from_tuples(
-        [(domain, feature, f, split, cat) for f in data.index],
-        names=["domain", "feature", "segment", "label", "cat"],
-    )
-    return data
-
-
-class SplitNotAvailableError(AttributeError):
-    """Raised when ``.by_attribute`` or ``.by_category`` is accessed on an
-    ``EvalResult`` produced without ``split_on``."""
-
-
-class AggregatedResult:
-    """A pair of descriptions and distances DataFrames at one aggregation level.
-
-    Returned by ``ScheduleView.combined``, ``.by_attribute``, and ``.by_category``.
-    """
-
-    def __init__(
-        self,
-        descriptions: DataFrame,
-        distances: DataFrame,
-        _label: str = "",
-    ):
-        self.descriptions = descriptions
-        self.distances = distances
-        self._label = _label
-
-    def __repr__(self) -> str:
-        header = (
-            f"AggregatedResult [{self._label}]" if self._label else "AggregatedResult"
-        )
-        return f"{header}\n\n{self.distances.to_string()}"
-
-    def save(self, path: str | Path) -> None:
-        """Write ``descriptions.csv`` and ``distances.csv`` to *path*."""
-        out = Path(path)
-        out.mkdir(parents=True, exist_ok=True)
-        self.descriptions.to_csv(out / "descriptions.csv")
-        self.distances.to_csv(out / "distances.csv")
-
-
-class ScheduleView:
-    """Accessor for one schedule aggregation level (features / groups / domains).
-
-    Access ``.combined``, ``.by_attribute``, or ``.by_category`` to get an
-    ``AggregatedResult``.  Split-based views raise ``SplitNotAvailableError``
-    when the parent ``EvalResult`` was produced without ``split_on``.
-    """
-
-    def __init__(
-        self,
-        descriptions: ResultFrame,
-        distances: ResultFrame,
-        target_distance_weights: Series,
-        schedule: Literal["features", "groups", "domains"],
-        has_splits: bool,
-        drop_features,
-        drop_groups,
-    ):
-        self._descriptions = descriptions
-        self._distances = distances
-        self._target_distance_weights = target_distance_weights
-        self._schedule = schedule
-        self._has_splits = has_splits
-        self._drop_features = drop_features
-        self._drop_groups = drop_groups
-
-    def _compute(self, extra: list[str]) -> AggregatedResult:
-        from acteval._aggregation import (
-            descriptions_to_domain_level,
-            descriptions_to_group_level,
-            distances_to_domain_level,
-            distances_to_group_level,
-        )
-
-        split_name = (
-            "combined"
-            if not extra
-            else ("by_attribute" if extra == ["label"] else "by_category")
-        )
-        label = f"{self._schedule} × {split_name}"
-        if self._schedule == "features":
-            desc, dist = _aggregate_features(
-                self._descriptions,
-                self._distances,
-                self._target_distance_weights,
-                extra=extra,
-            )
-        elif self._schedule == "groups":
-            desc_rf = descriptions_to_group_level(
-                self._descriptions, extra=extra, drop=self._drop_features
-            )
-            dist_rf = distances_to_group_level(
-                self._distances,
-                self._target_distance_weights,
-                extra=extra,
-                drop=self._drop_features,
-            )
-            desc = desc_rf.values.copy()
-            if desc_rf.units is not None:
-                desc["unit"] = desc_rf.units
-            dist = dist_rf.values.copy()
-            if dist_rf.units is not None:
-                dist["unit"] = dist_rf.units
-        else:  # domains
-            group_desc_rf = descriptions_to_group_level(
-                self._descriptions, extra=extra, drop=self._drop_features
-            )
-            group_dist_rf = distances_to_group_level(
-                self._distances,
-                self._target_distance_weights,
-                extra=extra,
-                drop=self._drop_features,
-            )
-            desc = descriptions_to_domain_level(
-                group_desc_rf, extra=extra, drop=self._drop_groups
-            ).values
-            dist = distances_to_domain_level(
-                group_dist_rf, extra=extra, drop=self._drop_groups
-            ).values
-        return AggregatedResult(desc, dist, _label=label)
-
-    @cached_property
-    def combined(self) -> AggregatedResult:
-        """Aggregated result with splits merged away."""
-        return self._compute([])
-
-    @cached_property
-    def by_attribute(self) -> AggregatedResult:
-        """Aggregated result split by attribute (one row per label value).
-
-        Raises ``SplitNotAvailableError`` if the parent ``EvalResult`` was
-        produced without ``split_on``.
-        """
-        if not self._has_splits:
-            raise SplitNotAvailableError(
-                "by_attribute is not available: this EvalResult was produced without split_on. "
-                "Pass target_attributes and split_on to Evaluator to enable split-based views."
-            )
-        return self._compute(["label"])
-
-    @cached_property
-    def by_category(self) -> AggregatedResult:
-        """Aggregated result split by attribute category (one row per label × cat).
-
-        Raises ``SplitNotAvailableError`` if the parent ``EvalResult`` was
-        produced without ``split_on``.
-        """
-        if not self._has_splits:
-            raise SplitNotAvailableError(
-                "by_category is not available: this EvalResult was produced without split_on. "
-                "Pass target_attributes and split_on to Evaluator to enable split-based views."
-            )
-        return self._compute(["label", "cat"])
-
-    def __repr__(self) -> str:
-        available = [".combined"]
-        if self._has_splits:
-            available += [".by_attribute", ".by_category"]
-        attrs = " / ".join(available)
-        return (
-            f"ScheduleView [{self._schedule}]  ({attrs})\n\n"
-            f"{self.combined.distances.to_string()}"
-        )
-
-
-class EvalResult:
-    """Stores raw segment-level data; computes three-tier aggregation on demand.
-
-    Access ``result.features``, ``result.groups``, or ``result.domains`` to get
-    a ``ScheduleView``, then ``.combined``, ``.by_attribute``, or
-    ``.by_category`` to obtain an ``AggregatedResult``.
-
-    Examples::
-
-        result.domains.combined.distances      # domain-level distances
-        result.groups.by_attribute.distances   # group-level, split by attribute
-        result.features.by_category.save("out/raw/")
-    """
-
-    def __init__(
-        self,
-        descriptions: ResultFrame,
-        distances: ResultFrame,
-        target_distance_weights: Series,
-    ):
-        # descriptions: values/weights columns are ["target"] + model_names.
-        # distances: values/weights columns are model_names only — there's no
-        # such thing as the target's distance to itself.
-        self._descriptions = descriptions
-        self._distances = distances
-        # Raw per-row target weight, blended into each model's own weight
-        # before aggregating distances (see ResultFrame.aggregate_distances).
-        self._target_distance_weights = target_distance_weights
-
-    # --- raw access ---
-
-    @property
-    def raw(self) -> dict[str, ResultFrame]:
-        """Pre-aggregation data as ``ResultFrame`` objects (desc + dist).
-
-        ``descriptions`` includes the target's own value/weight as its
-        ``"target"`` column; ``distances`` covers models only. Pair with
-        ``target_distance_weights`` if you need to replicate
-        ``ResultFrame.aggregate_distances``'s weight blending yourself.
-        """
-        return {"descriptions": self._descriptions, "distances": self._distances}
-
-    @property
-    def target_distance_weights(self) -> Series:
-        """Raw per-row target weight used to blend into each model's own
-        weight before aggregating distances."""
-        return self._target_distance_weights
-
-    # --- split availability ---
-
-    @property
-    def has_splits(self) -> bool:
-        """True when the ``Evaluator`` was run with ``split_on``."""
-        return not (
-            self._descriptions.values.index.get_level_values("label").unique().tolist()
-            == ["__split__"]
-        )
-
-    # --- schedule-level accessors ---
-
-    @cached_property
-    def features(self) -> ScheduleView:
-        """Feature-level view: index ``(domain, feature, segment[, ...])``.
-
-        Most granular schedule level; useful for disk storage.
-        """
-        return ScheduleView(
-            self._descriptions,
-            self._distances,
-            self._target_distance_weights,
-            schedule="features",
-            has_splits=self.has_splits,
-            drop_features=DEFAULT_REMOVE_FEATURES,
-            drop_groups=DEFAULT_REMOVE_GROUPS,
-        )
-
-    @cached_property
-    def groups(self) -> ScheduleView:
-        """Group-level view: index ``(domain, feature[, ...])``.
-
-        Intermediate schedule level; one row per feature group.
-        """
-        return ScheduleView(
-            self._descriptions,
-            self._distances,
-            self._target_distance_weights,
-            schedule="groups",
-            has_splits=self.has_splits,
-            drop_features=DEFAULT_REMOVE_FEATURES,
-            drop_groups=DEFAULT_REMOVE_GROUPS,
-        )
-
-    @cached_property
-    def domains(self) -> ScheduleView:
-        """Domain-level view: index ``(domain[, ...])``.
-
-        Most aggregated level; best for terminal output and quick review.
-        """
-        return ScheduleView(
-            self._descriptions,
-            self._distances,
-            self._target_distance_weights,
-            schedule="domains",
-            has_splits=self.has_splits,
-            drop_features=DEFAULT_REMOVE_FEATURES,
-            drop_groups=DEFAULT_REMOVE_GROUPS,
-        )
-
-    # --- flexible accessor ---
-
-    _LEVELS = ("features", "groups", "domains")
-    _SPLITS = ("combined", "by_attribute", "by_category")
-
-    def at(self, level: str = "domains", split: str = "combined") -> AggregatedResult:
-        """Get an ``AggregatedResult`` at the given level and split.
-
-        The one thing to remember for anything beyond ``summary()`` /
-        ``rank_models()`` / ``best_model``: equivalent to chaining the
-        ``.features``/``.groups``/``.domains`` and
-        ``.combined``/``.by_attribute``/``.by_category`` properties, e.g.
-        ``result.at("groups", "by_attribute")`` is ``result.groups.by_attribute``.
-
-        Args:
-            level: One of "features", "groups", "domains".
-            split: One of "combined", "by_attribute", "by_category".
-
-        Returns:
-            The requested ``AggregatedResult``.
-
-        Raises:
-            ValueError: If ``level`` or ``split`` is not one of the allowed values.
-        """
-        if level not in self._LEVELS:
-            raise ValueError(f"level must be one of {self._LEVELS}, got {level!r}")
-        if split not in self._SPLITS:
-            raise ValueError(f"split must be one of {self._SPLITS}, got {split!r}")
-        return getattr(getattr(self, level), split)
-
-    # --- model introspection ---
-
-    @property
-    def model_names(self) -> list[str]:
-        """Model column names."""
-        return list(self._distances.values.columns)
-
-    def summary(self) -> DataFrame:
-        """Domain-level distances for each model."""
-        return self.domains.combined.distances
-
-    def rank_models(self) -> Series:
-        """Mean domain distance per model, sorted ascending (lower is better)."""
-        return self.summary().mean().sort_values()
-
-    @property
-    def best_model(self) -> str:
-        """Model name with the lowest mean domain distance."""
-        return self.rank_models().index[0]
-
-    def __repr__(self) -> str:
-        models = self.model_names
-        header = f"EvalResult — {len(models)} model(s): {', '.join(models)}"
-        return f"{header}\n\n{self.summary().to_string()}"
-
-    # --- persistence ---
-
-    def save(self, path: str | Path) -> None:
-        """Save aggregated frames to CSV files under *path*.
-
-        Creates subdirectories for each schedule × split combination.
-        Combined tiers are always written; split-based tiers are written only
-        when the ``EvalResult`` was produced with ``split_on``.
-        """
-        out = Path(path)
-        self.features.combined.save(out / "features")
-        self.groups.combined.save(out / "groups")
-        self.domains.combined.save(out / "domains")
-        if self.has_splits:
-            self.features.by_attribute.save(out / "features_by_attribute")
-            self.features.by_category.save(out / "features_by_category")
-            self.groups.by_attribute.save(out / "groups_by_attribute")
-            self.groups.by_category.save(out / "groups_by_category")
-            self.domains.by_attribute.save(out / "domains_by_attribute")
-            self.domains.by_category.save(out / "domains_by_category")
+from acteval.results import (
+    EvalResult,
+    _append_split_cat_index,
+    _tag_density_index,
+    combine,
+)
 
 
 class Evaluator:
@@ -654,7 +283,7 @@ class Evaluator:
         synthetic: dict[str, DataFrame],
         attributes: dict[str, DataFrame] | None = None,
         verbose: bool = False,
-    ) -> "EvalResult":
+    ) -> EvalResult:
         """Compare synthetic populations against pre-computed target features.
 
         This is the primary entry point for running multiple synthetic
@@ -690,7 +319,7 @@ class Evaluator:
         synthetic_schedules: dict[str, DataFrame],
         synthetic_attributes: dict[str, DataFrame] | None = None,
         verbose: bool = False,
-    ) -> "EvalResult":
+    ) -> EvalResult:
         """Shared implementation behind ``Evaluator.compare``."""
         self.collected_description_values = {}
         self.collected_description_weights = {}
@@ -1074,3 +703,46 @@ def compare(
         progress=progress,
     )
     return evaluator.compare(synthetic, attributes=attributes, verbose=verbose)
+
+
+def compare_many(
+    targets: dict[str, DataFrame],
+    synthetic: dict[str, DataFrame],
+    attributes: dict[str, DataFrame] | None = None,
+    target_attributes: dict[str, DataFrame] | None = None,
+    split_on: list[str] | None = None,
+    **kwargs,
+) -> EvalResult:
+    """Compare the same synthetic models against each of several targets.
+
+    Runs one ordinary `compare()` call per target, then `combine()`s the
+    results (see `acteval.results.combine`) into a single `EvalResult` with
+    model columns named `"{target_name}::{model_name}"`.
+
+    Args:
+        targets: ``{target_name: observed_schedules_df}``.
+        synthetic: ``{model_name: schedules_df}``, compared against every target.
+        attributes: Optional ``{model_name: attributes_df}``, shared across targets.
+        target_attributes: Optional ``{target_name: attributes_df}`` — per-target
+            attributes, required together with ``split_on``.
+        split_on: Optional attribute column(s) to split each target's evaluation by.
+        **kwargs: Passed through to ``compare()`` (e.g. ``disable``, ``progress``).
+
+    Returns:
+        A single combined ``EvalResult``; see ``acteval.results.combine`` for
+        details and the known target-weight-base limitation.
+    """
+    results = {
+        name: compare(
+            target_df,
+            synthetic,
+            attributes=attributes,
+            target_attributes=(
+                target_attributes.get(name) if target_attributes else None
+            ),
+            split_on=split_on,
+            **kwargs,
+        )
+        for name, target_df in targets.items()
+    }
+    return combine(results)

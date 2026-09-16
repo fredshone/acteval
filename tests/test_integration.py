@@ -11,7 +11,8 @@ import pytest
 from pandas import DataFrame
 
 from acteval._jobs import CreativityConfig, EvalConfig, StructuralConfig, get_jobs
-from acteval.evaluate import Evaluator, SplitNotAvailableError, compare
+from acteval.evaluate import Evaluator, compare
+from acteval.results import SplitNotAvailableError
 
 # ---------------------------------------------------------------------------
 # Extra fixtures for split-based tests

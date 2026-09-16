@@ -8,61 +8,106 @@ pip install acteval
 
 ## Input format
 
-pandas DataFrame, one row per activity episode:
+pandas (or polars) DataFrame, one row per activity episode:
 - pid — person identifier (int or str)
 - act — activity label (str, e.g. "home", "work", "shop")
 - start — episode start time (numeric, any consistent unit)
 - end — episode end time (numeric)
 - duration — episode duration (numeric)
 
+Any two of start/end/duration are enough — the third is derived.
+
 ## Key API
 
 - compare(observed, synthetic, **kwargs) → EvalResult
   Compare one or more synthetic DataFrames to observed.
-  synthetic can be a single DataFrame or {"name": df, ...} dict.
+  synthetic can be a single DataFrame (result column "synthetic") or {"name": df, ...} dict.
+  kwargs: attributes, target_attributes, split_on (attribute-based splitting),
+  disable (dotted config.toml keys to switch off), progress (tqdm bars), verbose.
 
-- Evaluator(observed) — cache observed features for repeated comparisons.
-  evaluator.compare({"v1": df_v1}) re-uses cached observed features.
+- Evaluator(observed, target_attributes=None, split_on=None, ...) — caches observed
+  features for repeated comparisons. evaluator.compare({"v1": df_v1}) re-uses them.
+  Low-level: evaluator.compare_population(model, schedule, attributes=None) +
+  evaluator.report() for one-model-at-a-time accumulation.
+
+- compare_many(targets, synthetic, **kwargs) → EvalResult
+  Compare the same synthetic models against several targets ({name: df} dict).
+  Runs compare() once per target and combine()s the results; model columns are
+  named "{target_name}::{model_name}".
+
+- acteval.results.combine(results: dict[str, EvalResult]) → EvalResult
+  Merge several already-computed EvalResults (e.g. one per target) into one,
+  namespacing model columns by source key. Used internally by compare_many().
+  Known limitation: the target/unit values used for feature→group→domain
+  aggregation come from the first result only.
 
 - pairwise_distances(schedules, specs=None) → PairwiseResult
-  NxN distance matrix between individual schedules.
-  result.matrix (numpy), result.to_dataframe() (labeled).
+  NxN distance matrix between individual schedules (not population vs population).
+  result.matrix (numpy), result.pids, result.to_dataframe() (labeled).
 
 ## EvalResult structure
 
-Six DataFrames at three aggregation levels:
-- distances / descriptions              — per-feature (index: domain, feature, segment)
-- group_distances / group_descriptions  — per feature group (index: domain, feature)
-- domain_distances / domain_descriptions — per domain (index: domain)
+Three aggregation levels, each further split three ways:
 
-Convenience: result.summary(), result.rank_models(), result.best_model
+- result.features / .groups / .domains → ScheduleView (most → least granular;
+  index is (domain, feature, segment), (domain, feature), (domain) respectively)
+- each ScheduleView: .combined / .by_attribute / .by_category → AggregatedResult
+  (the latter two require split_on, else raise SplitNotAvailableError)
+- each AggregatedResult: .distances and .descriptions DataFrames.
+  distances has one column per model; descriptions also has a "target" column
+  (the observed population's own value, for comparison).
+
+Dispatcher: result.at(level="domains", split="combined") reaches any of the 9
+combinations; result.at() == result.at("domains", "combined") == result.summary()
+as a distances-only shortcut.
+
+Convenience: result.summary(), result.rank_models(), result.best_model,
+result.save(path) (writes every level/split to CSV).
+
+Advanced: result.raw → {"descriptions": ResultFrame, "distances": ResultFrame}
+(pre-aggregation values/weights/units, before any tier collapse); pair with
+result.target_distance_weights to replicate the weighted aggregation yourself.
 
 ## Evaluation domains
 
-- participations — who does what and how often; participation rates, joint participation
-- transitions    — activity sequence patterns (2-, 3-, 4-gram bigrams)
-- timing         — start times and durations (EMD via Wasserstein distance)
+- participations — who does what and how often; participation rates, joint participation, sequence lengths
+- transitions    — activity sequence patterns (2-, 3-, 4-gram)
+- timing         — start times and durations, incl. joint distributions (EMD via Wasserstein distance)
 - creativity     — novelty and diversity of synthetic schedules vs observed
 - feasibility    — structural validity: home-based, no consecutive duplicate activities
+- sequences      — full abbreviated tour-string distributions (e.g. "h>w>h"); off by default
 
 Missing activity penalty: 1.0 (maximum) for timing; None (compute on available data) for participation/transitions.
+
+list_features() enumerates every feature function with its domain/config key.
+list_disable_keys() enumerates every dotted disable=[...] path (e.g. "jobs.creativity.novelty").
+
+## CLI
+
+acteval compare TARGET -m NAME SCHEDULE [ATTRS] [-m ...] [--target-attrs PATH
+--split-on COL] [--disable KEY] [-o DIR] [-l features|groups|domains] [--batch DIR]
+
+acteval filter non-home-based|consecutive SCHEDULE [-o OUT] — spot-check a
+synthetic population for structural issues before running compare.
 
 ## Pairwise distance specs
 
 from acteval.pairwise import chamfer_spec, soft_dtw_spec, default_pairwise_specs
-- default_pairwise_specs() — MAE on participation counts, bigram counts, mean durations
+- default_pairwise_specs() — three equal-weight MAE specs: participations, transitions, timing
 - chamfer_spec(max_len, weight) — Chamfer on EOS-padded (N, L, 2) sequences
 - soft_dtw_spec(max_len, gamma, weight) — Soft-DTW on EOS-padded sequences
 
 ## Source layout
 
 src/acteval/
-- evaluate.py       — public API: compare(), Evaluator, evaluate()
-- _pipeline.py      — evaluation engine; builds features → groups → domains output
-- population.py     — Population: core data structure, integer-encodes activities/persons
-- _jobs.py          — JobSpec dataclass, get_jobs(); reads config.toml
-- pairwise.py       — pairwise_distances(), PairwiseResult, spec factories
-- features/         — structural, frequency, times, transitions, participation, creativity
-- distance/         — wasserstein.py (EMD via POT), scalar.py (MAE/MSE/MAPE)
-- describe/         — descriptive stats alongside distance metrics
-- _filters.py       — filter_novel(): removes sequences seen in base population
+- evaluate.py       — comparison entry points: compare(), Evaluator, compare_many()
+- results.py        — EvalResult/ScheduleView/AggregatedResult/SplitNotAvailableError, combine()
+- _pipeline.py       — evaluation engine; builds per-feature rows, three-tier aggregation
+- _aggregation.py, _result_frame.py — aggregation math, values/weights/units separation (ResultFrame)
+- population.py      — Population: core data structure, integer-encodes activities/persons
+- _jobs.py           — JobSpec/EvalConfig, get_jobs(); reads config.toml; list_disable_keys()
+- pairwise.py         — pairwise_distances(), PairwiseResult, spec factories
+- features/           — structural, frequency, times, transitions, participation, creativity; catalogue.py (list_features())
+- distance/           — wasserstein.py (EMD via POT), scalar.py (MAE/MSE/MAPE)
+- plot/               — matplotlib helpers (not imported by compare()/Evaluator)
+- cli.py              — `acteval` command (compare, filter subcommands)

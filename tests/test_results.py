@@ -3,8 +3,8 @@ import warnings
 import pytest
 from pandas import DataFrame
 
-from acteval.evaluate import compare
-from acteval.results import combine, compare_many
+from acteval.evaluate import compare, compare_many
+from acteval.results import combine
 
 
 @pytest.fixture

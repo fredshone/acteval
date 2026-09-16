@@ -162,10 +162,10 @@ instead.
 
 `compare()`/`Evaluator` compare N synthetic models against one target. To compare
 the *same* synthetic models against several targets (e.g. several observed
-populations) and see them side-by-side, use `acteval.results.compare_many()`:
+populations) and see them side-by-side, use `compare_many()`:
 
 ```python
-from acteval.results import compare_many
+from acteval import compare_many
 
 result = compare_many(
     {"target_a": observed_a, "target_b": observed_b},
