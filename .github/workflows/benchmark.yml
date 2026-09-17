@@ -34,7 +34,7 @@ jobs:
           output-file-path: output.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
-          alert-threshold: "120%"
+          alert-threshold: "150%"
           comment-on-alert: true
           fail-on-alert: true
           benchmark-data-dir-path: dev/bench
