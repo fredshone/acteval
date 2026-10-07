@@ -1,43 +1,141 @@
-# acteval
+# Acteval
 
-A Python library for evaluating synthetic activity schedules by comparing them to observed data. Given a population of daily activity sequences (who did what and when), `acteval` measures how well a synthetic population reproduces the observed distribution across multiple dimensions: activity frequencies, timing, transitions, participation rates, and novelty.
+[![CI](https://github.com/fredshone/acteval/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fredshone/acteval/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/acteval)](https://pypi.org/project/acteval/)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/acteval/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/fredshone/acteval/blob/main/LICENSE)
+[![Benchmarks](https://img.shields.io/badge/benchmarks-dashboard-orange)](https://fredshone.github.io/acteval/dev/bench/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+
+**Act**ivity schedule **eval**uation. A density estimation framework, and supplementary metrics, for comprehensively comparing or evaluating samples of activity schedules and joint attributes. CLI and python API.
+
+Skip to:
+- [About](#about)
+- [Quick Start](#quick-start)
+- [Data Formats](#data-formats)
+- [API](#api)
+- [CLI](#cli)
+- [Development](#development)
+- [Benchmarks](#benchmarks)
 
 ## Install
 
 ```bash
-pip install acteval
+pip install acteval  # or uv pip install...
 ```
 
-Or with [uv](https://github.com/astral-sh/uv):
+Or for your own python project (I recommend using [uv](https://github.com/astral-sh/uv)):
 
 ```bash
 uv add acteval
 ```
 
+## About
+
+### Density estimation
+
+Activity schedules are complex, high-dimensional, sequences of activity participations and times. Comparing the (probability) densities of high dimensional data samples is hard. Acteval tackles density estimation through comprehensive *slicing*. An example of a single *slice* might be a histogram of trips rates. The histograms of trips rates, between an **observed** or target sample, can be compared to a candidate or **synthetic** sample using earth movers distance (EMD) such that lower distances show a closer match.
+
+To give a comprehensive estimation of density numerous slices are considered, for example:
+
+- The participation rates of shop activities
+- The transition rates of changing from home to work activities
+- The start times of education activities.
+
+![density estimation explainer](assets/density-estimation.png)
+
+### Domains
+
+The default [configuration](https://github.com/fredshone/acteval/blob/main/src/acteval/config.toml) of Acteval disaggregates slices by activity types and includes joint distributions such as start times and durations of an activity type. This results in *a lot* of slices. For convenience, these are aggregated (using weighted averages) into top-level **domain** metrics and mid-level **group** metrics, as follows: 
+
+- **Participations** *- do activities take place the correct number of times?*:
+    - **Trip rates** *- are sequences the correct length?*
+    - **Activity rates** *- how often do people go to e.g. work?*
+    - **Joint activity rates** *- how often do people go to e.g. work and shop?*
+- **Transitions** *- do activities take place in the correct order?*:
+    - **Activity 2-grams** *- how often do people transition from e.g. work to shop?*
+    - **Activity 3-grams** *- how often do people transition from e.g. home to work to home?*
+    - **Activity 4-grams** *- how often do people transition from e.g. home to shop to work to home?*
+- **Timings** *- do activities take place at the correct times and for the correct durations?*:
+    - **Activity start times** *- when do people start e.g. work?*
+    - **Activity durations** *- how long do people e.g. shop?*
+    - **Activity joint start times and durations** *- when do people start and how long do they e.g. work?*
+    - **Activity 2-gram durations** *- how long do people e.g. shop and work?*
+
+### Joint attributes-schedules density estimation
+
+The above metrics consider the density estimates of samples of activity schedules. These can be further sliced based on associated attributes or labels so that the joint distribution of samples and schedules with associated attributes, such as *the income of the person undertaking the schedule*, or *the day of the week the schedule took place on*, can be considered.
+
+This is achieved by additionally supplying **observed** and **synthetic** attributes that can be joined to their corresponding schedules using unique `pid` identifiers. As with the regular density estimations, category-level distances are typically aggregated to attribute-level and then domain-level.
+
+
+### Supplementary metrics
+
+We also supplement these density estimation distances with creativity and feasibility metrics for the synthetic sample as follows:
+
+- **Creativity** *- is my model realistically diverse and does it avoid memorisation?*:
+    - **Diversity** *- are generated samples unique from each other?*
+    - **Novelty** *- are generated samples unique from the observed samples?*
+- **Feasibility** *- does my model avoid structural zeros i.e. unrealistic schedules?*:
+    - **Home-based** *- do samples start and end at home?*
+    - **Sequences** *- do samples include consecutive work, education or home activities?*
+
+In all cases we calculate probabilities and report the complementary, so that smaller is better. Note that the feasibility metrics are highly opinionated and may not suit all use cases.
+
+
 ## Quick start
+
+There is both a command line interface and python interface:
+
+### CLI in brief
+
+Once installed, run the following on your command line, for example using `uv run` or install as an executable using `uv tool install acteval`,
+
+```bash
+# Compare one model to observed activity schedules
+acteval compare observed.csv -m my_model synthetic.csv
+
+# Compare multiple models side-by-side
+acteval compare observed.csv -m model_a synthetic_a.csv -m model_b synthetic_b.csv
+
+# Save results to a specific output dir (the default is ./results/)
+acteval compare observed.csv -m my_model synthetic.csv -o my_results/
+
+# Split evaluation by attributes (e.g. gender and age)
+acteval compare observed.csv --target-attrs target_attrs.csv \
+  -m model_a synthetic_a.csv synth_attrs_a.csv \
+  -m model_b synthetic_b.csv synth_attrs_b.csv \
+  --split-on gender age
+```
+
+Explore the CLI further using `acteval --help` or refer to more details, such as batch mode, further below. 
+
+### Python API in brief
 
 ```python
 import pandas as pd
 from acteval import compare
 
 observed = pd.DataFrame([
-    {"pid": 0, "act": "home", "start": 0,  "end": 8,  "duration": 8},
-    {"pid": 0, "act": "work", "start": 8,  "end": 16, "duration": 8},
-    {"pid": 0, "act": "home", "start": 16, "end": 24, "duration": 8},
-    {"pid": 1, "act": "home", "start": 0,  "end": 12, "duration": 12},
-    {"pid": 1, "act": "shop", "start": 12, "end": 13, "duration": 1},
-    {"pid": 1, "act": "home", "start": 13, "end": 24, "duration": 11},
+    {"pid": 0, "act": "home", "start": 0,  "end": 8},
+    {"pid": 0, "act": "work", "start": 8,  "end": 16},
+    {"pid": 0, "act": "home", "start": 16, "end": 24},
+    {"pid": 1, "act": "home", "start": 0,  "end": 12},
+    {"pid": 1, "act": "shop", "start": 12, "end": 13},
+    {"pid": 1, "act": "home", "start": 13, "end": 24},
 ])
 
 synthetic = pd.DataFrame([
-    {"pid": 0, "act": "home", "start": 0,  "end": 9,  "duration": 9},
-    {"pid": 0, "act": "work", "start": 9,  "end": 17, "duration": 8},
-    {"pid": 0, "act": "home", "start": 17, "end": 24, "duration": 7},
-    {"pid": 1, "act": "home", "start": 0,  "end": 8,  "duration": 8},
-    {"pid": 1, "act": "work", "start": 8,  "end": 16, "duration": 8},
-    {"pid": 1, "act": "home", "start": 16, "end": 24, "duration": 8},
-    {"pid": 2, "act": "home", "start": 0,  "end": 8,  "duration": 8},
-    {"pid": 2, "act": "home", "start": 8, "end": 24, "duration": 16},
+    {"pid": 0, "act": "home", "start": 0,  "end": 9},
+    {"pid": 0, "act": "work", "start": 9,  "end": 17},
+    {"pid": 0, "act": "home", "start": 17, "end": 24},
+    {"pid": 1, "act": "home", "start": 0,  "end": 8},
+    {"pid": 1, "act": "work", "start": 8,  "end": 16},
+    {"pid": 1, "act": "home", "start": 16, "end": 24},
+    {"pid": 2, "act": "home", "start": 0,  "end": 8},
+    {"pid": 2, "act": "home", "start": 8, "end": 24},
 ])
 
 result = compare(observed, synthetic)
@@ -51,15 +149,63 @@ print(result.summary())
 # transitions     0.380952
 ```
 
-`synthetic` can also be a `{name: DataFrame}` dict to compare several models side-by-side in one call — see [Comparing populations](#comparing-populations).
+The `compare()` function also supports **batch** comparisons using `{name: DataFrame}` dict to compare several samples:
 
-`result` is an `EvalResult`. See [Reading the results](#reading-the-results) for how to dig deeper — the fast path is `summary()` / `rank_models()` / `best_model`; `result.at(...)` is the one accessor to remember for everything else.
+```{python}
+result = compare(
+    observed,
+    {
+        "model_a": synthetic_a,
+        "model_b": synthetic_b
+    },
+)
 
-Prefer the command line? Jump to [CLI](#cli) — it wraps the same `compare()` call for CSV/Parquet files without writing Python.
+```
 
-## Input format
+ — see [Comparing populations](#comparing-populations).
 
-Data is passed as a pandas (or [polars](https://pola.rs)) DataFrame with one row per activity episode, in the same shape as `observed`/`synthetic` above:
+
+The `compare()` function also supports **joint** attribute-schedule comparisons:
+
+```{python}
+result = compare(
+    target_schedules: observed,
+    target_attributes=target_attrs,
+    synthetic_schedules: synthetic,
+    synthetic_attributes=synthetic_attributes,
+    split_on=["gender", "weather"],
+)
+
+```
+
+...and **batching** of **joint** attribute-schedule comparisons:
+
+```{python}
+result = compare(
+    target_schedules: observed,
+    target_attributes=target_attrs,
+    synthetic_schedules: {
+        "model_a": synthetic_a,
+        "model_b": synthetic_b
+    },
+    synthetic_attributes={
+        "model_a": attributes_a,
+        "model_b": attributes_b
+    },
+    split_on=["gender", "weather"],
+)
+
+```
+
+`result` is an `EvalResult`. See [Reading the results](#reading-the-results) for more detail.
+
+## Data formats
+
+Data is passed as a pandas (or [polars](https://pola.rs)) DataFrames with the API. The CLI will accept both .csv and .parquet.
+
+### Activity schedules
+
+A DataFrame with one row per activity:
 
 | column | type | description |
 |--------|------|-------------|
@@ -67,33 +213,69 @@ Data is passed as a pandas (or [polars](https://pola.rs)) DataFrame with one row
 | `act` | str | Activity label (e.g. `"home"`, `"work"`, `"shop"`) |
 | `start` | numeric | Start time (any consistent unit, e.g. hours) |
 | `end` | numeric | End time |
-| `duration` | numeric | Duration (`end - start`); can be omitted when both `start` and `end` are provided |
+| `duration` | numeric | Duration (`end - start`) |
 
 Any two of `start`, `end`, and `duration` are sufficient — the third is derived automatically. A polars DataFrame in the same shape works anywhere a pandas one does; it's converted internally.
+
+### Attributes
+
+Attributes can be as a pandas (or polars) DataFrame with one row per activity schedule. These should be joinable using a `pid` column. Attributes themselves can be arbitrarily named and used, though we suggest restricting yourself string column names and to categorical variables. 
 
 ## API
 
 ### Comparing populations
 
-This is the primary workflow — comparing one or more synthetic populations against
-observed data. Start with `compare()`; reach for `Evaluator` only once you're
-calling it repeatedly against the same observed data.
+#### `compare(target_schedules, synthetic_schedules: DataFrame, **kwargs)`
 
-#### `compare(observed, synthetic, **kwargs)`
+```python
+result = compare(observed, synthetic)
+```
+`result` is an `EvalResult` object. See [Reading the results](#reading-the-results) for how to access distances and descriptions at feature, group, and domain level.
 
-`synthetic` can be a single DataFrame, as in Quick start (the result column is
-named `"synthetic"`), or a `{name: DataFrame}` dict to compare several models
-side-by-side in one call:
+#### `compare(target_schedules, synthetic_schedules: dict[str, DataFrame], **kwargs)`
+
+Name a synthetic sample, or provide multiple named samples using a dict:
 
 ```python
 result = compare(observed, {"model_a": synthetic_a, "model_b": synthetic_b})
 ```
 
-`result` is an `EvalResult` object. See [Reading the results](#reading-the-results) for how to access distances and descriptions at feature, group, and domain level.
+#### `compare(target_schedules, synthetic_schedules, target_attributes: DataFrame, synthetic_attributes: dict[str, DataFrame], split_on: list[str], **kwargs)`
+
+Pass `target_attributes` and `synthetic_attributes` and `split_on` to evaluate separately within each category of an attribute (e.g. gender) instead of over the whole population:
+
+```python
+target_attrs = pd.DataFrame({
+    "pid": [0, 1],
+    "gender": ["M", "F"]
+})
+synthetic_attributes = pd.DataFrame({
+    "pid": [0, 1],
+    "gender": ["F", "M"]
+})
+
+result = compare(
+    target_schedules=observed,  # <- target or observed activity schedules
+    synthetic_schedules={"my_model": synthetic},  # <- dict of synthetic activity schedules
+    target_attributes=target_attrs,  # <- target or observed attributes
+    synthetic_attributes={"my_model": synthetic_attributes},  # <- dict of synthetic attributes
+    split_on=["gender"],
+)
+```
+
+This makes the `by_attribute`/`by_category` splits available at every level via `result.at(level, split)` — see [Reading the results](#reading-the-results) for how to read them.
+
+> **Numeric split columns are auto-binned.** If a `split_on` column is numeric
+> (float, or an integer with more than 10 unique values), it's automatically
+> bucketed into up to 5 ordinal bins (`"lowest"`...`"highest"`) via `pd.qcut`,
+> with a `UserWarning` noting the bin edges chosen. Encode the column as a
+> categorical/string beforehand (e.g. your own age bands) to control the
+> buckets yourself and suppress the warning.
+
 
 #### `Evaluator`
 
-Use `Evaluator` when comparing multiple synthetic populations against the same observed data — it computes and caches the observed features once. Each `compare()` call is independent.
+`compare` is a wrapper for `Evaluator` — it computes and caches the observed features as required.
 
 ```python
 from acteval import Evaluator
@@ -104,49 +286,15 @@ result_v1 = evaluator.compare({"v1": synthetic_v1})
 result_v2 = evaluator.compare({"v2": synthetic_v2})
 ```
 
-For incremental accumulation — adding one model at a time, e.g. inside a loop with
-inspection between models — see `Evaluator.compare_population()` / `.report()` in
-the docstrings. Advanced; most users want `compare()` or `Evaluator.compare()`.
+#### `**kwargs`
 
-Pass `progress=True` to either `compare()` or `Evaluator(...)` to show tqdm
-progress bars while features are computed — useful for large populations.
-
-#### Splitting by attribute
-
-Pass `target_attributes` (for `observed`), `synthetic_attributes` (per synthetic model), and `split_on` to evaluate separately within each category of an attribute (e.g. gender) instead of over the whole population — the Python equivalent of the CLI's `--split-on` flag:
-
-```python
-target_attrs = pd.DataFrame({"pid": [0, 1], "gender": ["M", "F"]})
-synthetic_attributes = {"my_model": pd.DataFrame({"pid": [0, 1], "gender": ["M", "F"]})}
-
-result = compare(
-    observed,
-    {"my_model": synthetic},
-    synthetic_attributes=synthetic_attributes,
-    target_attributes=target_attrs,
-    split_on=["gender"],
-)
-```
-
-This makes the `by_attribute`/`by_category` splits available at every level via
-`result.at(level, split)` — see [Reading the results](#reading-the-results) for how
-to read them. Without `split_on`, both raise `SplitNotAvailableError`.
-
-> **Numeric split columns are auto-binned.** If a `split_on` column is numeric
-> (float, or an integer with more than 10 unique values), it's automatically
-> bucketed into up to 5 ordinal bins (`"lowest"`...`"highest"`) via `pd.qcut`,
-> with a `UserWarning` noting the bin edges chosen. Encode the column as a
-> categorical/string beforehand (e.g. your own age bands) to control the
-> buckets yourself and suppress the warning.
-
-#### Disabling specific metrics
+Pass `progress=True` to either `compare()` or `Evaluator(...)` to show tqdm progress bars.
 
 Pass `disable` with a list of dotted `section.key` paths matching `config.toml` to switch off individual metrics without writing a custom config file:
 
 ```python
 result = compare(
-    observed,
-    {"my_model": synthetic},
+    ...
     disable=["jobs.creativity.novelty", "jobs.transitions.4-gram"],
 )
 ```
@@ -158,14 +306,9 @@ disable=[...])` and the CLI's `--disable` flag; for anything more involved than 
 metric or two, pass a custom `config_path` or a pre-built `jobs` (`EvalConfig`)
 instead.
 
-#### Comparing against multiple targets
+You can also pass your own configuration to the `Evaluator` rather than using the [default](https://github.com/fredshone/acteval/blob/main/src/acteval/config.toml), `evaluator = Evaluator(observed, config_path=PATH)`.
 
-`compare()`/`Evaluator` compare N synthetic models against one target. For more
-than one target, there are two helpers, depending on whether you want every
-target compared against every model (a grid) or targets and models paired up
-one-to-one:
-
-##### `compare_grid()` — every target × every model
+#### `compare_grid()` — every target × every model
 
 To compare the *same* synthetic models against several targets (e.g. several
 observed populations) and see them side-by-side, use `compare_grid()`:
@@ -177,22 +320,6 @@ result = compare_grid(
     {"target_a": observed_a, "target_b": observed_b},
     {"model_1": synthetic_1, "model_2": synthetic_2},
 )
-```
-
-This runs one ordinary `compare()` call per target and merges the results into a
-single `EvalResult`, with model columns renamed `"{target_name}::{model_name}"` so
-nothing collides:
-
-```python
-print(result.model_names)
-# ['target_a::model_1', 'target_a::model_2', 'target_b::model_1', 'target_b::model_2']
-
-print(result.rank_models())
-# target_b::model_1    0.086425
-# target_a::model_1    0.188905
-# target_a::model_2    0.695448
-# target_b::model_2    0.702917
-# dtype: float64
 ```
 
 ##### `compare_many()` — targets and models paired one-to-one
@@ -240,12 +367,10 @@ result = combine(results)
 > target — this only affects aggregation weighting, and will be resolved by a
 > future refactor to carry one weight base per source.
 
-### Other entry points
-
-`compare()`/`Evaluator` cover population-level evaluation — the thing most users
-want. These are separate, optional tools for other use cases.
 
 #### `pairwise_distances(schedules, specs=None)`
+
+**WIP!**
 
 Compute a single NxN distance matrix between individual schedules. Useful for clustering, outlier detection, or directly comparing a small batch of schedules — a standalone code path, independent of `compare()`/`Evaluator`/`config.toml`.
 
@@ -288,30 +413,15 @@ gantt(observed)
 
 ## Reading the results
 
-### The fast path: `summary()`, `rank_models()`, `best_model`
+#### `EvalResult`
 
-For comparing models against each other, these three are usually all you need:
+`compare` and `Evaluator` return large amounts of metrics. These are exposed via an `EvalResult` object, which you can use, for example, to extract quick domain summaries with `summary`:
+
+#### `EvalResult.summary()`
+
+For comparing models against each other, `summary()` is usually all you need:
 
 ```python
-# df_a is the Quick start `synthetic`; df_b is a deliberately bad model
-# (everyone at "work" all day) to make the comparison obvious.
-df_a = synthetic
-df_b = pd.DataFrame([
-    {"pid": 0, "act": "work", "start": 0, "end": 24, "duration": 24},
-    {"pid": 1, "act": "work", "start": 0, "end": 24, "duration": 24},
-    {"pid": 2, "act": "work", "start": 0, "end": 24, "duration": 24},
-])
-result = compare(observed, {"model_a": df_a, "model_b": df_b})
-
-# Mean domain distance per model (lower is better)
-print(result.rank_models())
-# model_a    0.225144
-# model_b    0.698380
-# dtype: float64
-
-# Best model
-print(result.best_model)   # "model_a"
-
 # Domain-level summary table
 print(result.summary())
 #                   model_a   model_b
@@ -321,13 +431,20 @@ print(result.summary())
 # participations   0.162037  0.988889
 # timing           0.082728  0.669676
 # transitions      0.380952  0.500000
+
+
 ```
 
-Save all levels to CSV at once with `result.save("output_dir/")`.
+> **Known limitation:** The density estimation domain distances and supplementary metrics have different units, supports and typical values.
+We generally therefore do not aggregate them further into a "meta score". However you can access `rank_models()` and `best_model()` which do simply sum metrics to allow meta comparison. Use with care. For safer comparison we suggest normalisinng metrics against a baseline, for example, to report % improvement my each metric.
 
-### The one thing to remember: `result.at(level, split)`
+#### `EvalResult.save()`
 
-For anything more detailed than the summary table — a specific aggregation level, or a specific split — `result.at(...)` is the one accessor to remember:
+Save all (low-level features, via groups to top-level domains) to CSV with `result.save("output_dir/")`.
+
+#### `EvalResult.at(level, split)`
+
+For anything more detailed than the summary table — a specific aggregation level, or a specific split — `result.at(...)`:
 
 ```python
 result.at()                              # domains × combined (result.at().distances == result.summary())
@@ -336,40 +453,25 @@ result.at("features", "by_attribute")    # features × by_attribute (requires sp
 result.at("domains", "by_category")      # domains × by_category   (requires split_on)
 ```
 
-`level` is one of `"features"`, `"groups"`, `"domains"` (most → least granular); `split` is one of `"combined"`, `"by_attribute"`, `"by_category"` (the latter two require `split_on` — see [Splitting by attribute](#splitting-by-attribute)). Each call returns an `AggregatedResult` with `.distances` and `.descriptions` DataFrames — the former is what feeds `summary()`/`rank_models()`, the latter carries descriptive stats (e.g. average start time) at the same index. Passing anything else raises `ValueError` listing the allowed values.
+- `level` is one of `"features"`, `"groups"`, `"domains"`
+- `split` is one of `"combined"`, `"by_attribute"`, `"by_category"` 
 
-`result.at(level, split)` is a thin dispatcher over chained properties of the same names — `result.at("groups", "by_attribute")` and `result.groups.by_attribute` return the exact same object, so use whichever reads better at the call site. `.descriptions` always includes a `"target"` column alongside each model's, showing the observed population's own value for comparison. `result.raw` exposes the pre-aggregation data (one `ResultFrame` each for descriptions and distances) that every level above is aggregated from — `distances` covers models only (there's no such thing as the target's distance to itself); pair it with `result.target_distance_weights` if you're building custom distance aggregations of your own.
+Each call returns an `AggregatedResult` with `.distances` and `.descriptions` DataFrames.
 
-Distances are in the range **0–1** (lower is better). A distance of `0.0` means the synthetic distribution perfectly matches observed; `1.0` is the maximum penalty.
+#### `EvalResult.raw`
+
+`EvalResult.raw` exposes the pre-aggregation data (one `ResultFrame` each for descriptions and distances) that every level above is aggregated from — `distances` covers models only (there's no such thing as the target's distance to itself); pair it with `result.target_distance_weights` if you're building custom distance aggregations of your own.
 
 > **Note on timing features:** A distance of `1.0` for a timing feature means the activity is *entirely absent* from the synthetic population — not just timed differently. This is treated as a maximum-penalty missing feature rather than a distributional difference.
 
-### Evaluation domains
-
-| Domain | What it measures | `disable=[...]` prefix |
-|--------|-----------------|-------------------------|
-| `participations` | Who does what and how often — participation rates, joint participation, sequence lengths | `jobs.participations.*` |
-| `transitions` | Activity sequences — 2-, 3-, and 4-gram transition patterns | `jobs.transitions.*` |
-| `timing` | When and how long — start times, durations, and their joint distributions | `jobs.timing.*` |
-| `creativity` | How novel and diverse the synthetic schedules are relative to observed | `jobs.creativity.*` |
-| `feasibility` | Structural validity — home-based schedules, no consecutive duplicate activities | `jobs.feasibility.*` |
-| `sequences` | Full abbreviated tour-string distributions (e.g. `h>w>h`); off by default | `jobs.sequences.*` |
-
-The rightmost column is what to pass to `disable=[...]` (or `--disable` on the
-CLI) to switch off part of a domain — see [Disabling specific
-metrics](#disabling-specific-metrics). Call `list_features()` to see every
-individual feature computed within each domain (the finer-grained rows behind
-`result.features`), or `list_disable_keys()` for every valid `disable=[...]`
-path.
 
 ## CLI
 
 `acteval` ships with a command-line interface for comparing models without writing
 Python. It has two subcommands: `compare` (the primary one) and `filter`.
 
-```
-acteval compare TARGET [--target-attrs PATH] -m NAME SCHEDULE [ATTRS] [-m ...] [options]
-```
+#### `acteval compare`
+
 
 ```bash
 # Compare one model to observed data
@@ -393,17 +495,26 @@ acteval compare observed.csv -m my_model synthetic.csv --disable jobs.creativity
 
 Input files can be CSV or Parquet (detected by extension). Run `acteval compare --help` for the full option list.
 
-#### Advanced: splitting by attribute and batch mode
+As per the API it is also possible to do joint density estimation by providing attributes:
 
 ```bash
-# Split evaluation by attribute (e.g. gender)
+# Split evaluation by attribute (e.g. gender and age)
 # Per-model attrs are the third argument to -m
 # Attributes must be provided for the target and ALL models, or not at all
 acteval compare observed.csv --target-attrs target_attrs.csv \
   -m model_a synthetic_a.csv synth_attrs_a.csv \
   -m model_b synthetic_b.csv synth_attrs_b.csv \
-  --split-on gender
+  -s gender age
+```
 
+**Attribute rules:**
+- Attributes must be provided for **all** inputs (target + every model) or **none**. Partial specification raises an error.
+- `--split-on` (`-s`) and `--target-attrs` must be specified together.
+- In batch mode, if any model subdirectory contains an attributes file, all subdirectories must contain one.
+
+For the lazy - there is also an auto-discovery mode for batch experiments, but use with care:
+
+```bash
 # Batch mode: auto-discover model subdirectories
 # Each subdir becomes a model (name = dir name); schedule and attrs files are
 # classified by their columns (pid + act → schedule; pid + other cols → attrs)
@@ -413,10 +524,6 @@ acteval compare observed.csv --batch models/
 acteval compare observed.csv --target-attrs target_attrs.csv --batch models/ --split-on gender
 ```
 
-**Attribute rules:**
-- Attributes must be provided for **all** inputs (target + every model) or **none**. Partial specification raises an error.
-- `--split-on` and `--target-attrs` must be specified together.
-- In batch mode, if any model subdirectory contains an attributes file, all subdirectories must contain one.
 
 **Batch directory layout:**
 ```
@@ -425,10 +532,10 @@ models/
     schedules.csv      ← has pid, act → classified as schedule
     attributes.csv     ← has pid + other cols, no act → classified as attrs
   model_b/
-    output.parquet
+    ...
 ```
 
-### `acteval filter`
+#### `acteval filter`
 
 Filter a schedule file down to persons with a specific structural issue — useful for
 spot-checking a synthetic population before running `compare`.
