@@ -52,6 +52,11 @@ class Evaluator:
         target = _coerce_to_pandas(target)
         if target_attributes is not None:
             target_attributes = _coerce_to_pandas(target_attributes)
+        if jobs is not None and (config_path is not None or disable):
+            raise ValueError(
+                "jobs is a fully-built EvalConfig and cannot be combined with "
+                "config_path or disable; pass one or the other"
+            )
         if (target_attributes is None) != (split_on is None):
             raise ValueError(
                 "target_attributes and split_on must both be provided or both be None"
@@ -660,6 +665,7 @@ def compare(
     synthetic_attributes: dict[str, DataFrame] | None = None,
     split_on: list[str] | None = None,
     verbose: bool = False,
+    config_path=None,
     disable: list[str] | None = None,
     progress: bool = False,
 ) -> EvalResult:
@@ -679,12 +685,13 @@ def compare(
         split_on: Optional attribute column(s) to split evaluation by (e.g.
             ``["gender"]``).  Requires ``target_attributes`` and ``attributes``.
         verbose: Print progress for each (split, category) subset.
+        config_path: Optional path to a custom ``config.toml``; defaults to the
+            packaged config.
         disable: Optional dotted ``section.key`` config paths to switch off,
             e.g. ``["jobs.creativity.novelty", "jobs.transitions.4-gram"]`` —
-            see ``config.toml`` for the full list of keys. Sugar for the common
-            case of disabling one or two metrics without writing a config file;
-            pass ``config_path``/``jobs`` via ``Evaluator`` directly for
-            anything more involved.
+            see ``config.toml`` for the full list of keys. Applied on top of
+            whatever ``config_path`` loads; sugar for the common case of
+            disabling one or two metrics without writing a config file.
         progress: Show tqdm progress bars while computing features. Useful for
             large populations; pass ``Evaluator(progress=True)`` directly
             instead if you're also making repeated ``compare()`` calls.
@@ -699,6 +706,7 @@ def compare(
         target_schedules,
         target_attributes=target_attributes,
         split_on=split_on,
+        config_path=config_path,
         disable=disable,
         progress=progress,
     )
@@ -727,7 +735,8 @@ def compare_grid(
         attributes_a: Optional ``{name: attributes_df}``.
         attributes_b: Optional ``{name: attributes_df}``.
         split_on: Optional attribute column(s) to split each target's evaluation by.
-        **kwargs: Passed through to ``compare()`` (e.g. ``disable``, ``progress``).
+        **kwargs: Passed through to ``compare()`` (e.g. ``config_path``,
+            ``disable``, ``progress``).
 
     Returns:
         A single combined ``EvalResult``; see ``acteval.results.combine`` for
@@ -770,7 +779,8 @@ def compare_many(
         attributes_a: Optional ``{name: attributes_df}``.
         attributes_b: Optional ``{name: attributes_df}``.
         split_on: Optional attribute column(s) to split each pair's evaluation by.
-        **kwargs: Passed through to ``compare()`` (e.g. ``disable``, ``progress``).
+        **kwargs: Passed through to ``compare()`` (e.g. ``config_path``,
+            ``disable``, ``progress``).
 
     Returns:
         A single combined ``EvalResult``; see ``acteval.results.combine`` for

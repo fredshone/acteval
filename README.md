@@ -9,7 +9,14 @@
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 
-**Act**ivity schedule **eval**uation. A density estimation framework, and supplementary metrics, for comprehensively comparing or evaluating samples of activity schedules and joint attributes. CLI and python API.
+**Act**ivity schedule **eval**uation. A density estimation framework, and supplementary metrics, for comprehensively comparing or evaluating samples of activity schedules and associated attributes. CLI and python API.
+
+**Why Acteval?**
+
+- **Agnostic** - Acteval provides a thorough evaluation framework agnostic of downstream application.
+- **Explainable** - High-level quantitative evaluation is composed of a hierarchy of interpretable metrics.
+
+> **Work in progress.** Acteval has been in use since 2024, and included in various publications. But is still under active development. We therefore do not commit to backward compatibility of outputs until version 1 is released.
 
 Skip to:
 - [About](#about)
@@ -91,7 +98,7 @@ There is both a command line interface and python interface:
 
 ### CLI in brief
 
-Once installed, run the following on your command line, for example using `uv run` or install as an executable using `uv tool install acteval`,
+Once installed, run the following on your command line, for example using `uv run` or install as an executable using `uv tool install acteval`.
 
 ```bash
 # Compare one model to observed activity schedules
@@ -110,7 +117,7 @@ acteval compare observed.csv --target-attrs target_attrs.csv \
   --split-on gender age
 ```
 
-Explore the CLI further using `acteval --help` or refer to more details, such as batch mode, further below. 
+Explore the CLI further using `acteval --help` or refer to more details [below](#api), such as batch mode. 
 
 ### Python API in brief
 
@@ -151,7 +158,7 @@ print(result.summary())
 
 The `compare()` function also supports **batch** comparisons using `{name: DataFrame}` dict to compare several samples:
 
-```{python}
+```python
 result = compare(
     observed,
     {
@@ -162,12 +169,9 @@ result = compare(
 
 ```
 
- — see [Comparing populations](#comparing-populations).
-
-
 The `compare()` function also supports **joint** attribute-schedule comparisons:
 
-```{python}
+```python
 result = compare(
     target_schedules: observed,
     target_attributes=target_attrs,
@@ -180,7 +184,7 @@ result = compare(
 
 ...and **batching** of **joint** attribute-schedule comparisons:
 
-```{python}
+```python
 result = compare(
     target_schedules: observed,
     target_attributes=target_attrs,
@@ -302,11 +306,15 @@ result = compare(
 Call `list_disable_keys()` to see every valid dotted path up front, instead of
 reading `config.toml` or triggering the `ValueError` an unknown key raises (which
 also lists the valid paths). `disable` also works on `Evaluator(observed,
-disable=[...])` and the CLI's `--disable` flag; for anything more involved than a
-metric or two, pass a custom `config_path` or a pre-built `jobs` (`EvalConfig`)
-instead.
+disable=[...])` and the CLI's `--disable` flag.
 
-You can also pass your own configuration to the `Evaluator` rather than using the [default](https://github.com/fredshone/acteval/blob/main/src/acteval/config.toml), `evaluator = Evaluator(observed, config_path=PATH)`.
+For anything more involved than a metric or two, pass your own configuration file
+rather than using the [default](https://github.com/fredshone/acteval/blob/main/src/acteval/config.toml),
+e.g. `compare(observed, synthetic, config_path=PATH)` (also accepted by
+`compare_grid()`, `compare_many()`, `Evaluator(...)` and the CLI's `--config`).
+`disable` is applied on top of whatever `config_path` loads. `Evaluator` also
+accepts a pre-built `jobs` (`EvalConfig`), which cannot be combined with
+`config_path` or `disable`.
 
 #### `compare_grid()` — every target × every model
 
@@ -344,7 +352,7 @@ print(result.model_names)
 
 Both helpers accept `attributes_a`/`attributes_b` (per-target/per-model
 attributes DataFrames) and `split_on`, and pass any other keyword arguments
-(e.g. `disable`, `progress`) through to `compare()`.
+(e.g. `config_path`, `disable`, `progress`) through to `compare()`.
 
 For per-target attributes/`split_on` with more control, or to inspect
 intermediate per-target results before merging, call `compare()` yourself in a
@@ -370,7 +378,7 @@ result = combine(results)
 
 #### `pairwise_distances(schedules, specs=None)`
 
-**WIP!**
+> **Work in progress only!**
 
 Compute a single NxN distance matrix between individual schedules. Useful for clustering, outlier detection, or directly comparing a small batch of schedules — a standalone code path, independent of `compare()`/`Evaluator`/`config.toml`.
 

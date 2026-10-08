@@ -1,7 +1,7 @@
 import pytest
 
 from acteval._jobs import apply_overrides, get_jobs, load_config
-from acteval.evaluate import Evaluator, compare
+from acteval.evaluate import Evaluator, compare, compare_grid, compare_many
 
 
 def test_apply_overrides_disables_one_nested_key():
@@ -76,3 +76,61 @@ def test_compare_disable_kwarg(observed, synthetic):
 def test_compare_disable_unknown_key_raises(observed, synthetic):
     with pytest.raises(ValueError):
         compare(observed, synthetic, disable=["jobs.not_real"])
+
+
+@pytest.fixture
+def no_transitions_config(tmp_path):
+    cfg = load_config()
+    lines = []
+    for section, table in [("ngrams", cfg["ngrams"])] + [
+        (f"jobs.{name}", table) for name, table in cfg["jobs"].items()
+    ]:
+        lines.append(f"[{section}]")
+        for key, value in table.items():
+            if section == "jobs.transitions":
+                value = False
+            lines.append(f'"{key}" = {str(value).lower()}')
+    path = tmp_path / "config.toml"
+    path.write_text("\n".join(lines))
+    return path
+
+
+def _domains(result):
+    return set(result.domains.combined.distances.index.get_level_values("domain"))
+
+
+def test_compare_config_path(observed, synthetic, no_transitions_config):
+    result = compare(observed, synthetic, config_path=no_transitions_config)
+    domains = _domains(result)
+    assert "transitions" not in domains
+    assert "timing" in domains  # unaffected
+
+
+def test_compare_config_path_with_disable(observed, synthetic, no_transitions_config):
+    result = compare(
+        observed,
+        synthetic,
+        config_path=no_transitions_config,
+        disable=["jobs.feasibility.home_based"],
+    )
+    assert "transitions" not in _domains(result)
+    features = result.features.combined.distances.index.get_level_values("feature")
+    assert not any(f.startswith("not home based") for f in features)
+
+
+def test_compare_grid_and_many_forward_config_path(
+    observed, synthetic, no_transitions_config
+):
+    for fn in (compare_grid, compare_many):
+        result = fn(
+            {"t": observed}, {"m": synthetic}, config_path=no_transitions_config
+        )
+        assert "transitions" not in _domains(result)
+
+
+def test_evaluator_jobs_conflicts_with_config_path_or_disable(observed):
+    jobs = get_jobs()
+    with pytest.raises(ValueError, match="cannot be combined"):
+        Evaluator(observed, jobs=jobs, disable=["jobs.creativity.novelty"])
+    with pytest.raises(ValueError, match="cannot be combined"):
+        Evaluator(observed, jobs=jobs, config_path="config.toml")

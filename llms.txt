@@ -23,21 +23,30 @@ Any two of start/end/duration are enough — the third is derived.
   Compare one or more synthetic DataFrames to observed.
   synthetic can be a single DataFrame (result column "synthetic") or {"name": df, ...} dict.
   kwargs: attributes, target_attributes, split_on (attribute-based splitting),
-  disable (dotted config.toml keys to switch off), progress (tqdm bars), verbose.
+  config_path (custom config.toml), disable (dotted config.toml keys to switch
+  off, applied on top of config_path), progress (tqdm bars), verbose.
 
-- Evaluator(observed, target_attributes=None, split_on=None, ...) — caches observed
-  features for repeated comparisons. evaluator.compare({"v1": df_v1}) re-uses them.
+- Evaluator(observed, target_attributes=None, split_on=None, config_path=None,
+  disable=None, jobs=None, ...) — caches observed features for repeated
+  comparisons. evaluator.compare({"v1": df_v1}) re-uses them. jobs (a pre-built
+  EvalConfig) cannot be combined with config_path/disable (ValueError).
   Low-level: evaluator.compare_population(model, schedule, attributes=None) +
   evaluator.report() for one-model-at-a-time accumulation.
 
-- compare_many(targets, synthetic, **kwargs) → EvalResult
-  Compare the same synthetic models against several targets ({name: df} dict).
-  Runs compare() once per target and combine()s the results; model columns are
-  named "{target_name}::{model_name}".
+- compare_grid(schedules_a, schedules_b, attributes_a=None, attributes_b=None,
+  split_on=None, **kwargs) → EvalResult
+  Compare every synthetic model in schedules_b against every target in
+  schedules_a ({name: df} dicts). Runs compare() once per target and combine()s
+  the results; model columns are named "{target_name}::{model_name}".
+  **kwargs (e.g. config_path, disable, progress) pass through to compare().
+
+- compare_many(schedules_a, schedules_b, ...same args) → EvalResult
+  Like compare_grid but pairwise: dicts are paired by position (must be the same
+  length); model columns are named "{name_a}::{name_b}".
 
 - acteval.results.combine(results: dict[str, EvalResult]) → EvalResult
   Merge several already-computed EvalResults (e.g. one per target) into one,
-  namespacing model columns by source key. Used internally by compare_many().
+  namespacing model columns by source key. Used internally by compare_grid()/compare_many().
   Known limitation: the target/unit values used for feature→group→domain
   aggregation come from the first result only.
 
@@ -85,7 +94,7 @@ list_disable_keys() enumerates every dotted disable=[...] path (e.g. "jobs.creat
 ## CLI
 
 acteval compare TARGET -m NAME SCHEDULE [ATTRS] [-m ...] [--target-attrs PATH
---split-on COL] [--disable KEY] [-o DIR] [-l features|groups|domains] [--batch DIR]
+--split-on COL] [-c CONFIG] [--disable KEY] [-o DIR] [-l features|groups|domains] [--batch DIR]
 
 acteval filter non-home-based|consecutive SCHEDULE [-o OUT] — spot-check a
 synthetic population for structural issues before running compare.
