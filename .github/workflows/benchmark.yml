@@ -12,22 +12,47 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@v4
 
       - name: Install Python 3.13
         run: uv python install 3.13
 
+      # Baseline and candidate run on the same runner, so the comparison is not
+      # thrown off by hardware differences between GitHub-hosted machines.
+      - name: Run baseline benchmarks (previous commit)
+        env:
+          BASE_SHA: ${{ github.event.before }}
+        run: |
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            BASE_SHA=$(git rev-parse HEAD~1)
+          fi
+          echo "Baseline: $BASE_SHA"
+          git worktree add "$RUNNER_TEMP/baseline" "$BASE_SHA"
+          cd "$RUNNER_TEMP/baseline"
+          uv sync
+          uv run pytest tests/test_bench_evaluate.py tests/test_bench_pairwise.py \
+            --benchmark-only \
+            --benchmark-save=baseline
+          cp -r .benchmarks "$GITHUB_WORKSPACE/.benchmarks"
+
       - name: Install dependencies
         run: uv sync
 
-      - name: Run benchmarks
+      - name: Run candidate benchmarks and compare
         run: >
           uv run pytest tests/test_bench_evaluate.py tests/test_bench_pairwise.py
           --benchmark-only
+          --benchmark-compare=0001
+          --benchmark-compare-fail=min:50%
           --benchmark-json output.json
 
+      # History for the gh-pages chart only; regressions are gated by the
+      # same-runner comparison above, as cross-runner alerts are too noisy.
       - name: Store benchmark results
+        if: ${{ !cancelled() && hashFiles('output.json') != '' }}
         uses: benchmark-action/github-action-benchmark@v1
         with:
           tool: pytest
@@ -35,6 +60,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
           alert-threshold: "150%"
-          comment-on-alert: true
-          fail-on-alert: true
+          comment-on-alert: false
+          fail-on-alert: false
           benchmark-data-dir-path: dev/bench
