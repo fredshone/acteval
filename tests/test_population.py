@@ -136,3 +136,29 @@ def test_unsorted_pids():
     assert np.all(pop.pids[:-1] <= pop.pids[1:])
     assert pop.n == 2
     assert_array_equal(pop.pid_counts, [2, 2])
+
+
+def test_dense_pids_from_original_order_missing_and_mixed_types():
+    import numpy as np
+    from pandas import DataFrame
+
+    from acteval.population import Population
+
+    df = DataFrame(
+        {
+            "pid": [3, 1, 2],
+            "act": ["home"] * 3,
+            "start": 0,
+            "end": 1440,
+            "duration": 1440,
+        }
+    )
+    pop = Population(df)
+    np.testing.assert_array_equal(
+        pop.dense_pids_from_original(np.array([2, 9, 1, 1])), [1, 0, 0]
+    )
+    assert len(pop.dense_pids_from_original(np.array(["2", "1"]))) == 0
+    np.testing.assert_array_equal(
+        pop.dense_pids_from_original(np.array(["a", 3], dtype=object)), [2]
+    )
+    assert len(pop.dense_pids_from_original(np.array([], dtype=np.int64))) == 0

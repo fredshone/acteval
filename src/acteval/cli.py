@@ -265,6 +265,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Attribute columns to split evaluation on (requires --target-attrs and per-model attrs)",
     )
     compare.add_argument(
+        "--split-order",
+        type=int,
+        metavar="N",
+        default=None,
+        help="Combine N split-on attributes per slice, e.g. 2 for gender & income "
+        "(requires --split-on; default from config, 1)",
+    )
+    compare.add_argument(
+        "--min-split-size",
+        type=int,
+        metavar="N",
+        default=None,
+        help="Skip slices with fewer than N target persons "
+        "(default from config; none at order 1, 30 above)",
+    )
+    compare.add_argument(
         "--config", "-c", metavar="PATH", help="Path to custom config.toml"
     )
     compare.add_argument(
@@ -345,6 +361,10 @@ def _run(args: argparse.Namespace) -> None:
     # --- split-on requires attrs (and vice versa) ---
     if bool(args.split_on) and not bool(args.target_attrs):
         sys.exit("--split-on requires --target-attrs to be specified")
+    if (
+        args.split_order is not None or args.min_split_size is not None
+    ) and not args.split_on:
+        sys.exit("--split-order and --min-split-size require --split-on")
 
     # --- load target attributes ---
     target_attributes: pd.DataFrame | None = None
@@ -418,6 +438,8 @@ def _run(args: argparse.Namespace) -> None:
         config_path=args.config,
         progress=not args.no_progress,
         disable=args.disable,
+        split_order=args.split_order,
+        min_split_size=args.min_split_size,
     )
     # Attrs are only meaningful for splitting; don't pass them when split_on is absent
     attrs_for_evaluator = attributes if args.split_on else None
@@ -450,6 +472,12 @@ def _run(args: argparse.Namespace) -> None:
         if result.has_splits:
             print("\nDomain distances by attribute:")
             print_markdown(result.domains.by_attribute.distances)
+            if result.split_order > 1:
+                print(
+                    f"\nDomain distances by single attribute "
+                    f"(pooled over order-{result.split_order} slices):"
+                )
+                print_markdown(result.at("domains", "by_attribute", order=1).distances)
         print("\nDomain distances (lower is better):")
         print_markdown(result.domains.combined.distances)
 

@@ -25,12 +25,13 @@ from acteval._progress import bar_scope as _bar_scope
 from acteval._progress import bar_set_item as _bar_set_item
 from acteval._progress import make_bar as _make_bar
 from acteval._result_frame import ResultFrame
-from acteval._splits import _key_activities
+from acteval._splits import _key_activities, build_slices, group_pids
 from acteval.features import creativity, structural
 from acteval.population import Population
 from acteval.results import (
     EvalResult,
     _append_split_cat_index,
+    _concat_tagged,
     _tag_density_index,
     combine,
 )
@@ -48,6 +49,8 @@ class Evaluator:
         jobs: EvalConfig | None = None,
         progress: bool = False,
         disable: list[str] | None = None,
+        split_order: int | None = None,
+        min_split_size: int | None = None,
     ):
         target = _coerce_to_pandas(target)
         if target_attributes is not None:
@@ -57,6 +60,8 @@ class Evaluator:
                 "jobs is a fully-built EvalConfig and cannot be combined with "
                 "config_path or disable; pass one or the other"
             )
+        if split_order is not None and split_order > 1 and split_on is None:
+            raise ValueError("split_order > 1 requires split_on")
         if (target_attributes is None) != (split_on is None):
             raise ValueError(
                 "target_attributes and split_on must both be provided or both be None"
@@ -111,6 +116,19 @@ class Evaluator:
         self._jobs: EvalConfig = (
             jobs if jobs is not None else get_jobs(config_path, disable)
         )
+        uses_real_splits = split_on != ["__split__"]
+        self._split_order = (
+            (split_order or self._jobs.splits.order) if uses_real_splits else 1
+        )
+        min_size = (
+            min_split_size if min_split_size is not None else self._jobs.splits.min_size
+        )
+        self._slices = build_slices(
+            self._target_attributes,
+            split_on,
+            self._split_order,
+            min_size if uses_real_splits else 0,
+        )
         self._progress = progress
         self._precomputed = False
         # Progress bars for the model currently being processed by
@@ -164,28 +182,25 @@ class Evaluator:
                 self._target_pid_features[key] = spec.feature_fn(self._target_pop)
                 feature_bar.update(1)
 
-        # Phase 2: for each (split, category) combination, slice the target
-        # population to only the relevant pids and aggregate their features.
-        # The result — (split, cat, sub_schedule, cached_feature_dict) — is
-        # stored in _split_cat_info so compare_population can iterate over it.
+        # Phase 2: for each slice (a joint assignment of split_order attributes,
+        # built in __init__), restrict the target population to the relevant
+        # pids and aggregate their features. The result —
+        # (slice, sub_schedule, cached_feature_dict) — is stored in
+        # _split_cat_info so compare_population can iterate over it.
         self._split_cat_info: list[tuple] = []
-        for split in self._split_on:
-            for cat in self._target_attributes[split].unique():
-                target_orig_pids = self._target_attributes[
-                    self._target_attributes[split] == cat
-                ].pid.values
-                target_dense_pids = self._target_pop.dense_pids_from_original(
-                    target_orig_pids
-                )
-                sub_target = self._target[self._target.pid.isin(target_orig_pids)]
-                # Aggregate per-pid features down to population-level distributions
-                # for each (domain, name) key — these become the "target" side
-                # of every distance calculation.
-                cached_subset = {
-                    key: pf.subset(target_dense_pids).aggregate()
-                    for key, pf in self._target_pid_features.items()
-                }
-                self._split_cat_info.append((split, cat, sub_target, cached_subset))
+        for slice_, target_orig_pids in self._slices:
+            target_dense_pids = self._target_pop.dense_pids_from_original(
+                target_orig_pids
+            )
+            sub_target = self._target[self._target.pid.isin(target_orig_pids)]
+            # Aggregate per-pid features down to population-level distributions
+            # for each (domain, name) key — these become the "target" side
+            # of every distance calculation.
+            cached_subset = {
+                key: pf.aggregate_subset(target_dense_pids)
+                for key, pf in self._target_pid_features.items()
+            }
+            self._split_cat_info.append((slice_, sub_target, cached_subset))
 
         # Phase 3: build the target's per-row (value, weight, unit) Series that
         # will sit alongside the per-model columns in the final ResultFrames.
@@ -207,7 +222,8 @@ class Evaluator:
             self._progress,
             colour="cyan",
         ) as splits_bar:
-            for split, cat, sub_target, cached_subset in self._split_cat_info:
+            for slice_, sub_target, cached_subset in self._split_cat_info:
+                split, cat = slice_.key
                 _bar_set_item(
                     splits_bar, cat if split == "__split__" else f"{split}={cat}"
                 )
@@ -272,11 +288,11 @@ class Evaluator:
             raise ValueError(
                 "No evaluation jobs are enabled (check config/disable); nothing to report."
             )
-        self._target_description_values = concat(desc_value_parts)
-        self._target_description_weights = concat(desc_weight_parts)
-        self._target_description_units = concat(desc_unit_parts)
-        self._target_distance_weights = concat(dist_weight_parts)
-        self._target_distance_units = concat(dist_unit_parts)
+        self._target_description_values = _concat_tagged(desc_value_parts)
+        self._target_description_weights = _concat_tagged(desc_weight_parts)
+        self._target_description_units = _concat_tagged(desc_unit_parts)
+        self._target_distance_weights = _concat_tagged(dist_weight_parts)
+        self._target_distance_units = _concat_tagged(dist_unit_parts)
         self.collected_description_values: dict[str, Series] = {}
         self.collected_description_weights: dict[str, Series] = {}
         self.collected_distance_values: dict[str, Series] = {}
@@ -372,7 +388,7 @@ class Evaluator:
         # Create all bars upfront (one feature/splits pair per unit) so the
         # user sees the full scope of work immediately.
         n_density = len(self._jobs.density)
-        n_splits = sum(len(self._target_attributes[s].unique()) for s in self._split_on)
+        n_splits = len(self._slices)
         models = list(synthetic_schedules.keys())
 
         units: list[tuple[str, str]] = [] if self._precomputed else [("target", "cyan")]
@@ -499,16 +515,22 @@ class Evaluator:
         with _bar_scope(
             splits_bar, f"{model} [splits]", len(self._split_cat_info), self._progress
         ) as splits_bar:
-            for split, cat, _, cached_subset in self._split_cat_info:
+            synth_groups: dict[tuple, dict] = {}
+            for slice_, _, cached_subset in self._split_cat_info:
+                split, cat = slice_.key
                 _bar_set_item(
                     splits_bar, cat if split == "__split__" else f"{split}={cat}"
                 )
-                sample_pids = attributes[attributes[split] == cat].pid.values
+                if slice_.attrs not in synth_groups:
+                    synth_groups[slice_.attrs] = group_pids(attributes, slice_.attrs)
+                sample_pids = synth_groups[slice_.attrs].get(
+                    slice_.values, np.array([], dtype=attributes.pid.dtype)
+                )
                 synth_dense_pids = pop.dense_pids_from_original(sample_pids)
                 # Used below to skip density segments whose key activity is absent
                 # from this synthetic sub-population entirely.
                 synth_sub_acts = frozenset(
-                    schedule.loc[schedule.pid.isin(sample_pids), "act"].unique()
+                    pop.unique_acts[pop.act_count_matrix[synth_dense_pids].any(axis=0)]
                 )
 
                 if self._jobs.creativity.enabled:
@@ -562,7 +584,7 @@ class Evaluator:
                     #   - the array is empty, or
                     #   - the segment's key activity is absent from the synthetic
                     #     sub-population (avoids spurious missing-activity penalties).
-                    raw_synth = pid_features[key].subset(synth_dense_pids).aggregate()
+                    raw_synth = pid_features[key].aggregate_subset(synth_dense_pids)
                     synth_feat = {
                         k: v
                         for k, v in raw_synth.items()
@@ -593,16 +615,16 @@ class Evaluator:
 
         # Store results so report() can later concat them alongside the target's
         # own values/weights.
-        self.collected_description_values[model] = concat(
+        self.collected_description_values[model] = _concat_tagged(
             [p for p in desc_value_parts if not p.empty]
         )
-        self.collected_description_weights[model] = concat(
+        self.collected_description_weights[model] = _concat_tagged(
             [p for p in desc_weight_parts if not p.empty]
         )
-        self.collected_distance_values[model] = concat(
+        self.collected_distance_values[model] = _concat_tagged(
             [p for p in dist_value_parts if not p.empty]
         )
-        self.collected_distance_weights[model] = concat(
+        self.collected_distance_weights[model] = _concat_tagged(
             [p for p in dist_weight_parts if not p.empty]
         )
 
@@ -655,6 +677,8 @@ class Evaluator:
             target_distance_weights=self._target_distance_weights.reindex(
                 dist_values.index, fill_value=0.0
             ),
+            slice_assignments={s.key: s.assignment for s, _ in self._slices},
+            split_order=self._split_order,
         )
 
 
@@ -668,6 +692,8 @@ def compare(
     config_path=None,
     disable: list[str] | None = None,
     progress: bool = False,
+    split_order: int | None = None,
+    min_split_size: int | None = None,
 ) -> EvalResult:
     """Compare observed and synthetic activity schedule populations.
 
@@ -695,6 +721,14 @@ def compare(
         progress: Show tqdm progress bars while computing features. Useful for
             large populations; pass ``Evaluator(progress=True)`` directly
             instead if you're also making repeated ``compare()`` calls.
+        split_order: Number of ``split_on`` attributes combined per slice,
+            e.g. ``2`` scores every ``gender & income`` combination. Only this
+            order is computed; ``result.at(level, split, order=k)`` pools it
+            back down to lower orders. Defaults to the config's
+            ``[splits] order`` (1).
+        min_split_size: Skip slices with fewer target persons than this.
+            Defaults to the config's ``[splits] min_size``, else no minimum at
+            order 1 and 30 above.
 
     Returns:
         EvalResult with raw segment-level data; use ``result.at(...)`` or the
@@ -709,6 +743,8 @@ def compare(
         config_path=config_path,
         disable=disable,
         progress=progress,
+        split_order=split_order,
+        min_split_size=min_split_size,
     )
     return evaluator.compare(
         synthetic_schedules, attributes=synthetic_attributes, verbose=verbose

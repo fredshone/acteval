@@ -36,7 +36,6 @@ Each ``JobSpec`` carries a ``missing_distance`` value:
 - ``None`` (participation, transitions): EMD is computed on whatever data exists.
 """
 
-from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
 import numpy as np
@@ -75,9 +74,6 @@ def _aggregate_features(
     feat_dist["unit"] = descriptions.units.groupby(level=grouper).first()
 
     return feat_desc, feat_dist
-
-
-_PARALLEL_THRESHOLD = 50
 
 
 # ---------------------------------------------------------------------------
@@ -349,12 +345,9 @@ def _score_features(
             return missing_distance
         return distance(_get_or_default(a, k, default), _get_or_default(b, k, default))
 
-    if len(index) > _PARALLEL_THRESHOLD:
-        with ThreadPoolExecutor() as executor:
-            values = list(executor.map(_compute, index))
-        metrics = Series(dict(zip(index, values)), name=model)
-    else:
-        metrics = Series({k: _compute(k) for k in index}, name=model)
+    # Serial on purpose: individual EMDs are small and GIL-bound, so a thread
+    # pool costs more in scheduling overhead than it saves.
+    metrics = Series({k: _compute(k) for k in index}, name=model)
     metrics = metrics.fillna(0)
     return metrics
 

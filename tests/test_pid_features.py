@@ -35,9 +35,9 @@ def _pop():
 
 def _assert_features_equal(a, b, label=""):
     """Assert two feature dicts are equal, with a helpful error message."""
-    assert set(a.keys()) == set(
-        b.keys()
-    ), f"{label}: keys differ: {set(a.keys())} != {set(b.keys())}"
+    assert set(a.keys()) == set(b.keys()), (
+        f"{label}: keys differ: {set(a.keys())} != {set(b.keys())}"
+    )
     for k in a:
         av, aw = a[k]
         bv, bw = b[k]
@@ -367,3 +367,29 @@ def test_unique_pids_original_stored():
     )
     pop = Population(df)
     np.testing.assert_array_equal(pop.unique_pids_original, [10, 20])
+
+
+@pytest.mark.parametrize("bin_size,factor", [(None, 1), (15, 1440)])
+def test_aggregate_subset_matches_subset_aggregate(bin_size, factor):
+    from acteval.features._pid_features import PidFeatures
+
+    rng = np.random.default_rng(0)
+    pids = rng.integers(0, 50, size=400)
+    data = {
+        "1d": (rng.integers(0, 1440, size=400).astype(float), pids),
+        "2d": (rng.integers(0, 1440, size=(400, 2)).astype(float), pids),
+        "empty": (np.array([]), np.array([], dtype=np.int64)),
+    }
+    pf = PidFeatures(data=data, bin_size=bin_size, factor=factor)
+    for pid_set in [
+        np.arange(10),
+        rng.choice(50, 25),
+        np.array([999]),
+        np.array([], dtype=np.int64),
+    ]:
+        expected = pf.subset(pid_set).aggregate()
+        got = pf.aggregate_subset(pid_set)
+        assert expected.keys() == got.keys()
+        for k in expected:
+            np.testing.assert_array_equal(expected[k][0], got[k][0])
+            np.testing.assert_array_equal(expected[k][1], got[k][1])

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from numpy import ndarray
 
-from acteval.features._utils import compress_feature
+from acteval.features._utils import bin_values, compress_feature
 
 
 @dataclass
@@ -32,6 +32,11 @@ class PidFeatures:
     # Internal cache: maps ``id(pid_array)`` → mask for a given pid set,
     # so that per-person features sharing one pid array compute the mask once.
     _mask_cache: dict[int, ndarray] = field(default_factory=dict, repr=False)
+    # Internal cache: ``key`` → ``(scaled_uniques, inverse)``, so repeated
+    # ``aggregate_subset`` calls count codes instead of re-sorting values.
+    _encoded: dict[str, tuple[ndarray, ndarray]] = field(
+        default_factory=dict, repr=False
+    )
 
     def subset(self, pid_set: ndarray) -> PidFeatures:
         """Return a new PidFeatures containing only values for *pid_set*.
@@ -70,4 +75,43 @@ class PidFeatures:
                 result[key] = compress_feature(
                     values, bin_size=self.bin_size, factor=self.factor
                 )
+        return result
+
+    def _encode(self, key: str) -> tuple[ndarray, ndarray]:
+        if key not in self._encoded:
+            values = np.asarray(self.data[key][0])
+            if self.bin_size is not None:
+                values = bin_values(values, self.bin_size)
+            uniques, inverse = np.unique(values, axis=0, return_inverse=True)
+            self._encoded[key] = (uniques / self.factor, inverse.reshape(-1))
+        return self._encoded[key]
+
+    def aggregate_subset(self, pid_set: ndarray) -> dict[str, tuple[ndarray, ndarray]]:
+        """Equivalent to ``self.subset(pid_set).aggregate()``, but faster when
+        called repeatedly on the same object: values are encoded once and each
+        call only counts the codes belonging to *pid_set*.
+
+        Args:
+            pid_set: 1-D array of dense pid ints to keep.
+        """
+        pid_set = np.asarray(pid_set, dtype=np.int64)
+        member_cache: dict[int, ndarray] = {}
+        result: dict[str, tuple[ndarray, ndarray]] = {}
+        for key, (values, pids) in self.data.items():
+            if len(values) == 0 or len(pid_set) == 0:
+                result[key] = (np.array([]), np.array([], dtype=np.int64))
+                continue
+            pid_id = id(pids)
+            if pid_id not in member_cache:
+                member = np.zeros(max(pids.max(), pid_set.max()) + 1, dtype=bool)
+                member[pid_set] = True
+                member_cache[pid_id] = member[pids]
+            mask = member_cache[pid_id]
+            uniques, inverse = self._encode(key)
+            counts = np.bincount(inverse[mask], minlength=len(uniques))
+            present = counts > 0
+            if not present.any():
+                result[key] = (np.array([]), np.array([], dtype=np.int64))
+            else:
+                result[key] = (uniques[present], counts[present].astype(np.int64))
         return result

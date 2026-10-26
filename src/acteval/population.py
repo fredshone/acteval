@@ -220,11 +220,24 @@ class Population:
 
         Original pids not present in this population are silently dropped.
         """
-        orig_to_dense = {orig: i for i, orig in enumerate(self.unique_pids_original)}
-        return np.array(
-            [orig_to_dense[p] for p in original_pids if p in orig_to_dense],
-            dtype=np.int64,
-        )
+        uniques = self.unique_pids_original
+        original_pids = np.asarray(original_pids)
+        if len(original_pids) == 0 or len(uniques) == 0:
+            return np.array([], dtype=np.int64)
+        try:
+            # unique_pids_original is sorted (np.unique), so a binary search
+            # replaces a per-element dict lookup.
+            idx = np.searchsorted(uniques, original_pids)
+        except TypeError:
+            # Incomparable pid types (e.g. str vs int) — fall back to a dict.
+            orig_to_dense = {orig: i for i, orig in enumerate(uniques)}
+            return np.array(
+                [orig_to_dense[p] for p in original_pids if p in orig_to_dense],
+                dtype=np.int64,
+            )
+        idx = np.minimum(idx, len(uniques) - 1)
+        found = uniques[idx] == original_pids
+        return idx[found].astype(np.int64)
 
     @property
     def act_count_matrix(self) -> ndarray:

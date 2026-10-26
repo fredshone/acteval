@@ -80,6 +80,8 @@ def _make_args(target, model_pairs, **kwargs):
         model=list(model_pairs) if model_pairs is not None else None,
         target_attrs=None,
         split_on=None,
+        split_order=None,
+        min_split_size=None,
         config=None,
         disable=None,
         level="domains",
