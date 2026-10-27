@@ -228,10 +228,9 @@ class ScheduleView:
             distances, take, new_index = _expand_to_order(
                 distances, self._slice_assignments, order
             )
-            target_distance_weights = (
-                target_distance_weights.reindex(self._distances.values.index)
-                .iloc[take]
-                .set_axis(new_index)
+            # Already aligned to the distances index (see report()/combine()).
+            target_distance_weights = target_distance_weights.iloc[take].set_axis(
+                new_index
             )
         if self._schedule == "features":
             desc, dist = _aggregate_features(
@@ -481,7 +480,6 @@ class EvalResult:
     # --- flexible accessor ---
 
     _LEVELS = ("features", "groups", "domains")
-    _SPLITS = ("combined", "by_attribute", "by_category")
 
     def at(
         self, level: str = "domains", split: str = "combined", order: int | None = None
@@ -510,8 +508,6 @@ class EvalResult:
         """
         if level not in self._LEVELS:
             raise ValueError(f"level must be one of {self._LEVELS}, got {level!r}")
-        if split not in self._SPLITS:
-            raise ValueError(f"split must be one of {self._SPLITS}, got {split!r}")
         return getattr(self, level).view(split, order)
 
     # --- model introspection ---

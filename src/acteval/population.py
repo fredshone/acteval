@@ -2,7 +2,7 @@
 
 import numpy as np
 from numpy import ndarray
-from pandas import DataFrame
+from pandas import DataFrame, Index
 
 from acteval._compat import _coerce_to_pandas
 from acteval.features._utils import _cumcount
@@ -156,6 +156,7 @@ class Population:
         self._lazy_act_enum_key = None
         self._lazy_seq_key = None
         self._lazy_count_matrix = None
+        self._lazy_pid_index = None
 
     def _init_empty(self) -> None:
         """Initialise all arrays to empty for an empty DataFrame."""
@@ -180,6 +181,7 @@ class Population:
         self._lazy_act_enum_key = None
         self._lazy_seq_key = None
         self._lazy_count_matrix = None
+        self._lazy_pid_index = None
 
     def __len__(self) -> int:
         """Return total number of activity rows."""
@@ -220,24 +222,10 @@ class Population:
 
         Original pids not present in this population are silently dropped.
         """
-        uniques = self.unique_pids_original
-        original_pids = np.asarray(original_pids)
-        if len(original_pids) == 0 or len(uniques) == 0:
-            return np.array([], dtype=np.int64)
-        try:
-            # unique_pids_original is sorted (np.unique), so a binary search
-            # replaces a per-element dict lookup.
-            idx = np.searchsorted(uniques, original_pids)
-        except TypeError:
-            # Incomparable pid types (e.g. str vs int) — fall back to a dict.
-            orig_to_dense = {orig: i for i, orig in enumerate(uniques)}
-            return np.array(
-                [orig_to_dense[p] for p in original_pids if p in orig_to_dense],
-                dtype=np.int64,
-            )
-        idx = np.minimum(idx, len(uniques) - 1)
-        found = uniques[idx] == original_pids
-        return idx[found].astype(np.int64)
+        if self._lazy_pid_index is None:
+            self._lazy_pid_index = Index(self.unique_pids_original)
+        idx = self._lazy_pid_index.get_indexer(np.asarray(original_pids))
+        return idx[idx >= 0].astype(np.int64)
 
     @property
     def act_count_matrix(self) -> ndarray:

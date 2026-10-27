@@ -29,9 +29,6 @@ class PidFeatures:
     bin_size: int | None = None
     factor: int = 1
 
-    # Internal cache: maps ``id(pid_array)`` → mask for a given pid set,
-    # so that per-person features sharing one pid array compute the mask once.
-    _mask_cache: dict[int, ndarray] = field(default_factory=dict, repr=False)
     # Internal cache: ``key`` → ``(scaled_uniques, inverse)``, so repeated
     # ``aggregate_subset`` calls count codes instead of re-sorting values.
     _encoded: dict[str, tuple[ndarray, ndarray]] = field(

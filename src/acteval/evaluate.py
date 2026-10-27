@@ -116,10 +116,12 @@ class Evaluator:
         self._jobs: EvalConfig = (
             jobs if jobs is not None else get_jobs(config_path, disable)
         )
-        uses_real_splits = split_on != ["__split__"]
-        self._split_order = (
-            (split_order or self._jobs.splits.order) if uses_real_splits else 1
-        )
+        self._uses_real_splits = split_on != ["__split__"]
+        if not self._uses_real_splits:
+            split_order = 1
+        elif split_order is None:
+            split_order = self._jobs.splits.order
+        self._split_order = split_order
         min_size = (
             min_split_size if min_split_size is not None else self._jobs.splits.min_size
         )
@@ -127,7 +129,7 @@ class Evaluator:
             self._target_attributes,
             split_on,
             self._split_order,
-            min_size if uses_real_splits else 0,
+            min_size if self._uses_real_splits else 0,
         )
         self._progress = progress
         self._precomputed = False
@@ -347,8 +349,7 @@ class Evaluator:
         self.collected_distance_values = {}
         self.collected_distance_weights = {}
 
-        uses_real_splits = self._split_on != ["__split__"]
-        if uses_real_splits:
+        if self._uses_real_splits:
             if synthetic_attributes is None:
                 raise ValueError(
                     "attributes is required for every model when the Evaluator "
@@ -462,9 +463,8 @@ class Evaluator:
         schedule = _coerce_to_pandas(schedule)
         if attributes is not None:
             attributes = _coerce_to_pandas(attributes)
-        uses_real_splits = self._split_on != ["__split__"]
         if attributes is None:
-            if uses_real_splits:
+            if self._uses_real_splits:
                 raise ValueError(
                     "attributes is required when the Evaluator was initialised with splits"
                 )
@@ -515,14 +515,15 @@ class Evaluator:
         with _bar_scope(
             splits_bar, f"{model} [splits]", len(self._split_cat_info), self._progress
         ) as splits_bar:
-            synth_groups: dict[tuple, dict] = {}
+            synth_groups = {
+                attrs: group_pids(attributes, attrs)
+                for attrs in dict.fromkeys(s.attrs for s, *_ in self._split_cat_info)
+            }
             for slice_, _, cached_subset in self._split_cat_info:
                 split, cat = slice_.key
                 _bar_set_item(
                     splits_bar, cat if split == "__split__" else f"{split}={cat}"
                 )
-                if slice_.attrs not in synth_groups:
-                    synth_groups[slice_.attrs] = group_pids(attributes, slice_.attrs)
                 sample_pids = synth_groups[slice_.attrs].get(
                     slice_.values, np.array([], dtype=attributes.pid.dtype)
                 )
