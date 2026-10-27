@@ -63,10 +63,17 @@ class StructuralConfig:
 
 
 @dataclass(frozen=True)
+class SplitConfig:
+    order: int = 1  # number of split_on attributes combined per slice
+    min_size: int | None = None  # min target persons per slice; None = auto
+
+
+@dataclass(frozen=True)
 class EvalConfig:
     density: list[JobSpec]
     creativity: CreativityConfig
     structural: StructuralConfig
+    splits: SplitConfig = SplitConfig()
 
 
 def load_config(path=None) -> dict:
@@ -361,6 +368,11 @@ def build_structural_config(cfg: dict) -> StructuralConfig:
     )
 
 
+def build_split_config(cfg: dict) -> SplitConfig:
+    s = cfg.get("splits", {})
+    return SplitConfig(order=s.get("order", 1), min_size=s.get("min_size"))
+
+
 def get_jobs(config_path=None, disable: list[str] | None = None) -> EvalConfig:
     """Load config and return active job specification.
 
@@ -377,4 +389,5 @@ def get_jobs(config_path=None, disable: list[str] | None = None) -> EvalConfig:
         density=build_density_jobs(cfg),
         creativity=build_creativity_config(cfg),
         structural=build_structural_config(cfg),
+        splits=build_split_config(cfg),
     )

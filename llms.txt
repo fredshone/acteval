@@ -23,6 +23,9 @@ Any two of start/end/duration are enough — the third is derived.
   Compare one or more synthetic DataFrames to observed.
   synthetic can be a single DataFrame (result column "synthetic") or {"name": df, ...} dict.
   kwargs: attributes, target_attributes, split_on (attribute-based splitting),
+  split_order (combine n split_on attributes per slice, e.g. 2 → "gender&income"
+  labels with "m&high" cats; default 1 or config [splits] order), min_split_size
+  (skip slices with fewer target persons; default none at order 1, 30 above),
   config_path (custom config.toml), disable (dotted config.toml keys to switch
   off, applied on top of config_path), progress (tqdm bars), verbose.
 
@@ -69,9 +72,14 @@ Three aggregation levels, each further split three ways:
 Dispatcher: result.at(level="domains", split="combined") reaches any of the 9
 combinations; result.at() == result.at("domains", "combined") == result.summary()
 as a distances-only shortcut.
+result.at(level, split, order=k) (split views only, 1 <= k <= result.split_order)
+pools the computed order-n slices down to k-attribute slices; e.g. at n=2,
+order=1 by_category "gender=m" pools every gender=m & * cell.
+result.slice_assignments maps (label, cat) → ((attr, value), ...).
 
 Convenience: result.summary(), result.rank_models(), result.best_model,
-result.save(path) (writes every level/split to CSV).
+result.save(path) (writes every level/split to CSV; plus *_order1 split
+views when split_order > 1).
 
 Advanced: result.raw → {"descriptions": ResultFrame, "distances": ResultFrame}
 (pre-aggregation values/weights/units, before any tier collapse); pair with
@@ -94,7 +102,7 @@ list_disable_keys() enumerates every dotted disable=[...] path (e.g. "jobs.creat
 ## CLI
 
 acteval compare TARGET -m NAME SCHEDULE [ATTRS] [-m ...] [--target-attrs PATH
---split-on COL] [-c CONFIG] [--disable KEY] [-o DIR] [-l features|groups|domains] [--batch DIR]
+--split-on COL [--split-order N] [--min-split-size N]] [-c CONFIG] [--disable KEY] [-o DIR] [-l features|groups|domains] [--batch DIR]
 
 acteval filter non-home-based|consecutive SCHEDULE [-o OUT] — spot-check a
 synthetic population for structural issues before running compare.

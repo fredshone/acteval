@@ -276,6 +276,30 @@ This makes the `by_attribute`/`by_category` splits available at every level via 
 > categorical/string beforehand (e.g. your own age bands) to control the
 > buckets yourself and suppress the warning.
 
+**Interaction slices (`split_order`).** By default each `split_on` attribute is
+sliced on its own (`gender=M`, `income=high`). Pass `split_order=n` to slice on
+every combination of `n` attributes instead, e.g. `split_order=2` scores every
+`gender & income` cell (labelled `label="gender&income"`, `cat="M&high"`):
+
+```python
+result = compare(
+    observed, {"my_model": synthetic},
+    target_attributes=target_attrs,
+    synthetic_attributes={"my_model": synthetic_attributes},
+    split_on=["gender", "income", "car"],
+    split_order=2,
+    min_split_size=30,  # skip cells with < 30 target persons (default above order 1)
+)
+result.at("domains", "by_category")           # one row per gender&income cell, etc.
+result.at("domains", "by_category", order=1)  # gender=M pooled over every gender=M & * cell
+```
+
+Only order `n` is computed; lower-order views (`order=k`) pool the order-`n`
+cells that contain each `k`-attribute assignment. Note that `combined` pools
+different slices at different orders, so its values change with `split_order`.
+Both settings can also be set in `config.toml` under `[splits]`. Slice counts
+grow combinatorially, so keep `n` small (2 is usually plenty).
+
 
 #### `Evaluator`
 
@@ -450,7 +474,7 @@ We generally therefore do not aggregate them further into a "meta score". Howeve
 
 Save all (low-level features, via groups to top-level domains) to CSV with `result.save("output_dir/")`.
 
-#### `EvalResult.at(level, split)`
+#### `EvalResult.at(level, split, order=None)`
 
 For anything more detailed than the summary table — a specific aggregation level, or a specific split — `result.at(...)`:
 
@@ -463,6 +487,7 @@ result.at("domains", "by_category")      # domains × by_category   (requires sp
 
 - `level` is one of `"features"`, `"groups"`, `"domains"`
 - `split` is one of `"combined"`, `"by_attribute"`, `"by_category"` 
+- `order` (split views only) pools results down to `k`-attribute slices, for `1 <= k <= split_order`; it defaults to `split_order`
 
 Each call returns an `AggregatedResult` with `.distances` and `.descriptions` DataFrames.
 
@@ -513,11 +538,17 @@ acteval compare observed.csv --target-attrs target_attrs.csv \
   -m model_a synthetic_a.csv synth_attrs_a.csv \
   -m model_b synthetic_b.csv synth_attrs_b.csv \
   -s gender age
+
+# Score every gender & age combination (also prints the pooled single-attribute view)
+acteval compare observed.csv --target-attrs target_attrs.csv \
+  -m model_a synthetic_a.csv synth_attrs_a.csv \
+  -s gender age income --split-order 2 --min-split-size 30
 ```
 
 **Attribute rules:**
 - Attributes must be provided for **all** inputs (target + every model) or **none**. Partial specification raises an error.
 - `--split-on` (`-s`) and `--target-attrs` must be specified together.
+- `--split-order` and `--min-split-size` require `--split-on`. With `-o` and order > 1, extra `*_by_attribute_order1`/`*_by_category_order1` directories hold the pooled single-attribute views.
 - In batch mode, if any model subdirectory contains an attributes file, all subdirectories must contain one.
 
 For the lazy - there is also an auto-discovery mode for batch experiments, but use with care:

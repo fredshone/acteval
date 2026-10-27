@@ -5,6 +5,16 @@
 min_count = 3
 min_count_trigger = 10
 
+# Attribute slicing (only used with split_on). Each slice is a joint assignment
+# of `order` split_on attributes, e.g. order = 2 scores every gender & income
+# combination. Only the configured order is computed; result views can
+# aggregate it back down to lower orders (see EvalResult.at(..., order=k)).
+# min_size skips slices with fewer target persons (EMD on tiny samples is
+# noisy). Leave it unset for the default: no minimum at order 1, 30 above.
+[splits]
+order = 1
+# min_size = 30
+
 # Which evaluation jobs to run. Set any key to false to skip that feature.
 [jobs.participations]
 lengths     = true   # distribution of sequence lengths (number of episodes per person)

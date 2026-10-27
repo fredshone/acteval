@@ -1,5 +1,5 @@
 import numpy as np
-from ot import dist, emd2, emd2_1d
+from ot import dist, emd2
 from scipy.stats import wasserstein_distance
 
 try:
@@ -39,9 +39,17 @@ def emd1d(a: tuple[np.array, np.array], b: tuple[np.array, np.array]) -> float:
     if bw.sum() == 0:
         bk = np.array([0.0])
         bw = np.array([1.0])
-    aw = aw / aw.sum()
-    bw = bw / bw.sum()
-    return emd2_1d(ak, bk, aw, bw, metric="cityblock")
+    # W1 in 1-D is the area between the two CDFs. Equivalent to
+    # ot.emd2_1d(..., metric="cityblock") but avoids POT's per-call overhead
+    # (sparse coupling matrix construction), which dominates for small supports.
+    # Pool both supports with signed normalised weights: after sorting, the
+    # running sum is F_a - F_b at each point (ties contribute zero width).
+    support = np.concatenate([ak, bk])
+    signed = np.concatenate([aw / aw.sum(), -bw / bw.sum()])
+    order = np.argsort(support, kind="stable")
+    support = support[order]
+    cdf_diff = np.cumsum(signed[order])[:-1]
+    return float(np.abs(cdf_diff) @ np.diff(support))
 
 
 def wasserstein(x: list[list], y: list[list]):

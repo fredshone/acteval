@@ -10,12 +10,14 @@ The comparison entry points themselves (`Evaluator`, `compare()`,
 `compare_grid()`, `compare_many()`) live in `evaluate.py`.
 """
 
+import itertools
 import warnings
 from functools import cached_property
 from pathlib import Path
 from typing import Literal
 
-from pandas import DataFrame, MultiIndex, Series, concat
+import numpy as np
+from pandas import DataFrame, Index, MultiIndex, Series, concat
 
 from acteval._aggregation import (
     DEFAULT_REMOVE_FEATURES,
@@ -27,21 +29,33 @@ from acteval._aggregation import (
 )
 from acteval._pipeline import _aggregate_features
 from acteval._result_frame import ResultFrame
+from acteval._splits import Slice
+
+# ``{(label, cat): ((attr, value), ...)}`` — the attribute assignment behind
+# each slice's index strings, so views never have to parse joined strings.
+SliceAssignments = dict[tuple, tuple[tuple[str, object], ...]]
+
+_INDEX_NAMES = ["domain", "feature", "segment", "label", "cat"]
+
+
+def _flat_tuple_index(tuples: list[tuple]) -> Index:
+    # A flat object Index of tuples (not a MultiIndex): building and
+    # concatenating hundreds of small MultiIndexes per split dominated runtime,
+    # so parts stay flat until ``_concat_tagged`` builds one MultiIndex.
+    return Index(tuples, tupleize_cols=False, dtype=object)
 
 
 def _append_split_cat_index(
     data: DataFrame | Series, split: str, cat
 ) -> DataFrame | Series:
-    """Append ``(split, cat)`` as trailing ``label``/``cat`` MultiIndex levels.
+    """Append ``(split, cat)`` as trailing ``label``/``cat`` index entries.
 
     Shared by creativity and structural rows, whose index already has its
     final shape (domain, feature, segment, ...) before this split/category
-    tag is added. Works on a ``DataFrame`` or a ``Series``.
+    tag is added. Works on a ``DataFrame`` or a ``Series``. The result has a
+    flat tuple index; combine parts with ``_concat_tagged``.
     """
-    data.index = MultiIndex.from_tuples(
-        [(*i, split, cat) for i in data.index],
-        names=list(data.index.names) + ["label", "cat"],
-    )
+    data.index = _flat_tuple_index([(*i, split, cat) for i in data.index])
     return data
 
 
@@ -53,13 +67,81 @@ def _tag_density_index(
     Density rows start with only a flat ``segment`` index (unlike creativity/
     structural, which already carry ``domain``/``feature``/``segment``), so
     this injects the two leading levels alongside the split/category tag.
-    Works on a ``DataFrame`` or a ``Series``.
+    Works on a ``DataFrame`` or a ``Series``. The result has a flat tuple
+    index; combine parts with ``_concat_tagged``.
     """
-    data.index = MultiIndex.from_tuples(
-        [(domain, feature, f, split, cat) for f in data.index],
-        names=["domain", "feature", "segment", "label", "cat"],
+    data.index = _flat_tuple_index(
+        [(domain, feature, f, split, cat) for f in data.index]
     )
     return data
+
+
+def _concat_tagged(parts: list[Series]) -> Series:
+    """Concatenate tagged parts and convert their flat tuple index into the
+    ``(domain, feature, segment, label, cat)`` MultiIndex."""
+    result = concat(parts)
+    result.index = MultiIndex.from_tuples(list(result.index), names=_INDEX_NAMES)
+    return result
+
+
+def _sub_keys(assignment: tuple, order: int) -> list[tuple]:
+    """``(label, cat)`` of every order-``order`` sub-assignment of *assignment*."""
+    return [
+        Slice(attrs=tuple(a for a, _ in sub), values=tuple(v for _, v in sub)).key
+        for sub in itertools.combinations(assignment, order)
+    ]
+
+
+def _expansion_positions(
+    index: MultiIndex, assignments: SliceAssignments, order: int
+) -> tuple[np.ndarray, MultiIndex]:
+    """Map each row to every order-``order`` slice its own slice contains.
+
+    Returns ``(take, new_index)``: row positions to take (each source row is
+    repeated once per sub-key) and the matching index with ``label``/``cat``
+    replaced by the sub-key. Rows whose ``(label, cat)`` has no assignment are
+    dropped.
+    """
+    labels = index.get_level_values("label")
+    cats = index.get_level_values("cat")
+    sub_keys_by_key = {
+        key: _sub_keys(assignment, order) for key, assignment in assignments.items()
+    }
+    take: list[int] = []
+    new_labels: list = []
+    new_cats: list = []
+    for pos, key in enumerate(zip(labels, cats)):
+        for sub_label, sub_cat in sub_keys_by_key.get(key, ()):
+            take.append(pos)
+            new_labels.append(sub_label)
+            new_cats.append(sub_cat)
+    take = np.asarray(take, dtype=np.int64)
+    new_index = MultiIndex.from_arrays(
+        [index.get_level_values(n)[take] for n in ("domain", "feature", "segment")]
+        + [new_labels, new_cats],
+        names=_INDEX_NAMES,
+    )
+    return take, new_index
+
+
+def _expand_to_order(
+    rf: ResultFrame, assignments: SliceAssignments, order: int
+) -> tuple[ResultFrame, np.ndarray, MultiIndex]:
+    """Re-key raw rows from their computed slices to order-``order`` slices.
+
+    A row from slice ``gender=male & income=high`` contributes to both
+    ``gender=male`` and ``income=high`` at ``order=1``; aggregating the
+    expanded rows then pools every computed slice containing each sub-slice.
+    Returns the expanded ``ResultFrame`` plus ``(take, new_index)`` so the
+    caller can expand aligned Series the same way.
+    """
+    take, new_index = _expansion_positions(rf.values.index, assignments, order)
+    expanded = ResultFrame(
+        values=rf.values.iloc[take].set_axis(new_index),
+        weights=rf.weights.iloc[take].set_axis(new_index),
+        units=rf.units.iloc[take].set_axis(new_index) if rf.units is not None else None,
+    )
+    return expanded, take, new_index
 
 
 class SplitNotAvailableError(AttributeError):
@@ -114,6 +196,8 @@ class ScheduleView:
         has_splits: bool,
         drop_features,
         drop_groups,
+        slice_assignments: SliceAssignments | None = None,
+        split_order: int = 1,
     ):
         self._descriptions = descriptions
         self._distances = distances
@@ -122,28 +206,46 @@ class ScheduleView:
         self._has_splits = has_splits
         self._drop_features = drop_features
         self._drop_groups = drop_groups
+        self._slice_assignments = slice_assignments or {}
+        self._split_order = split_order
+        self._views: dict[tuple[str, int], AggregatedResult] = {}
 
-    def _compute(self, extra: list[str]) -> AggregatedResult:
+    def _compute(self, extra: list[str], order: int | None = None) -> AggregatedResult:
         split_name = (
             "combined"
             if not extra
             else ("by_attribute" if extra == ["label"] else "by_category")
         )
         label = f"{self._schedule} × {split_name}"
+        descriptions = self._descriptions
+        distances = self._distances
+        target_distance_weights = self._target_distance_weights
+        if extra and order is not None and order < self._split_order:
+            label += f" (order {order})"
+            descriptions, _, _ = _expand_to_order(
+                descriptions, self._slice_assignments, order
+            )
+            distances, take, new_index = _expand_to_order(
+                distances, self._slice_assignments, order
+            )
+            # Already aligned to the distances index (see report()/combine()).
+            target_distance_weights = target_distance_weights.iloc[take].set_axis(
+                new_index
+            )
         if self._schedule == "features":
             desc, dist = _aggregate_features(
-                self._descriptions,
-                self._distances,
-                self._target_distance_weights,
+                descriptions,
+                distances,
+                target_distance_weights,
                 extra=extra,
             )
         elif self._schedule == "groups":
             desc_rf = descriptions_to_group_level(
-                self._descriptions, extra=extra, drop=self._drop_features
+                descriptions, extra=extra, drop=self._drop_features
             )
             dist_rf = distances_to_group_level(
-                self._distances,
-                self._target_distance_weights,
+                distances,
+                target_distance_weights,
                 extra=extra,
                 drop=self._drop_features,
             )
@@ -155,11 +257,11 @@ class ScheduleView:
                 dist["unit"] = dist_rf.units
         else:  # domains
             group_desc_rf = descriptions_to_group_level(
-                self._descriptions, extra=extra, drop=self._drop_features
+                descriptions, extra=extra, drop=self._drop_features
             )
             group_dist_rf = distances_to_group_level(
-                self._distances,
-                self._target_distance_weights,
+                distances,
+                target_distance_weights,
                 extra=extra,
                 drop=self._drop_features,
             )
@@ -176,33 +278,64 @@ class ScheduleView:
         """Aggregated result with splits merged away."""
         return self._compute([])
 
-    @cached_property
+    @property
     def by_attribute(self) -> AggregatedResult:
-        """Aggregated result split by attribute (one row per label value).
+        """Aggregated result split by attribute (one row per label value), at
+        the computed ``split_order``.
 
         Raises ``SplitNotAvailableError`` if the parent ``EvalResult`` was
         produced without ``split_on``.
         """
-        if not self._has_splits:
-            raise SplitNotAvailableError(
-                "by_attribute is not available: this EvalResult was produced without split_on. "
-                "Pass target_attributes and split_on to Evaluator to enable split-based views."
-            )
-        return self._compute(["label"])
+        return self.view("by_attribute")
 
-    @cached_property
+    @property
     def by_category(self) -> AggregatedResult:
-        """Aggregated result split by attribute category (one row per label × cat).
+        """Aggregated result split by attribute category (one row per label × cat),
+        at the computed ``split_order``.
 
         Raises ``SplitNotAvailableError`` if the parent ``EvalResult`` was
         produced without ``split_on``.
         """
+        return self.view("by_category")
+
+    def view(self, split: str, order: int | None = None) -> AggregatedResult:
+        """Aggregated result for *split* at view order *order*.
+
+        Args:
+            split: One of "combined", "by_attribute", "by_category".
+            order: Only for "by_attribute"/"by_category": the number of
+                attributes per row, ``1 <= order <= split_order`` (defaults to
+                ``split_order``). Below ``split_order``, each row pools every
+                computed slice containing it — e.g. with ``split_order=2``,
+                ``order=1``'s ``gender=male`` row pools every
+                ``gender=male & *`` slice.
+
+        Raises:
+            SplitNotAvailableError: For a split view without ``split_on``.
+            ValueError: If ``split`` or ``order`` is out of range.
+        """
+        if split == "combined":
+            return self.combined
+        if split not in ("by_attribute", "by_category"):
+            raise ValueError(
+                "split must be one of ('combined', 'by_attribute', 'by_category'), "
+                f"got {split!r}"
+            )
         if not self._has_splits:
             raise SplitNotAvailableError(
-                "by_category is not available: this EvalResult was produced without split_on. "
+                f"{split} is not available: this EvalResult was produced without split_on. "
                 "Pass target_attributes and split_on to Evaluator to enable split-based views."
             )
-        return self._compute(["label", "cat"])
+        order = self._split_order if order is None else order
+        if not 1 <= order <= self._split_order:
+            raise ValueError(
+                f"order must be between 1 and split_order={self._split_order}, "
+                f"got {order}"
+            )
+        if (split, order) not in self._views:
+            extra = ["label"] if split == "by_attribute" else ["label", "cat"]
+            self._views[(split, order)] = self._compute(extra, order)
+        return self._views[(split, order)]
 
     def __repr__(self) -> str:
         available = [".combined"]
@@ -234,6 +367,8 @@ class EvalResult:
         descriptions: ResultFrame,
         distances: ResultFrame,
         target_distance_weights: Series,
+        slice_assignments: SliceAssignments | None = None,
+        split_order: int = 1,
     ):
         # descriptions: values/weights columns are ["target"] + model_names.
         # distances: values/weights columns are model_names only — there's no
@@ -243,6 +378,9 @@ class EvalResult:
         # Raw per-row target weight, blended into each model's own weight
         # before aggregating distances (see ResultFrame.aggregate_distances).
         self._target_distance_weights = target_distance_weights
+        # Attribute assignment behind each (label, cat), for lower-order views.
+        self._slice_assignments = slice_assignments or {}
+        self._split_order = split_order
 
     # --- raw access ---
 
@@ -256,6 +394,16 @@ class EvalResult:
         ``ResultFrame.aggregate_distances``'s weight blending yourself.
         """
         return {"descriptions": self._descriptions, "distances": self._distances}
+
+    @property
+    def split_order(self) -> int:
+        """Number of ``split_on`` attributes combined per computed slice."""
+        return self._split_order
+
+    @property
+    def slice_assignments(self) -> SliceAssignments:
+        """``{(label, cat): ((attr, value), ...)}`` for every computed slice."""
+        return self._slice_assignments
 
     @property
     def target_distance_weights(self) -> Series:
@@ -289,6 +437,8 @@ class EvalResult:
             has_splits=self.has_splits,
             drop_features=DEFAULT_REMOVE_FEATURES,
             drop_groups=DEFAULT_REMOVE_GROUPS,
+            slice_assignments=self._slice_assignments,
+            split_order=self._split_order,
         )
 
     @cached_property
@@ -305,6 +455,8 @@ class EvalResult:
             has_splits=self.has_splits,
             drop_features=DEFAULT_REMOVE_FEATURES,
             drop_groups=DEFAULT_REMOVE_GROUPS,
+            slice_assignments=self._slice_assignments,
+            split_order=self._split_order,
         )
 
     @cached_property
@@ -321,14 +473,17 @@ class EvalResult:
             has_splits=self.has_splits,
             drop_features=DEFAULT_REMOVE_FEATURES,
             drop_groups=DEFAULT_REMOVE_GROUPS,
+            slice_assignments=self._slice_assignments,
+            split_order=self._split_order,
         )
 
     # --- flexible accessor ---
 
     _LEVELS = ("features", "groups", "domains")
-    _SPLITS = ("combined", "by_attribute", "by_category")
 
-    def at(self, level: str = "domains", split: str = "combined") -> AggregatedResult:
+    def at(
+        self, level: str = "domains", split: str = "combined", order: int | None = None
+    ) -> AggregatedResult:
         """Get an ``AggregatedResult`` at the given level and split.
 
         The one thing to remember for anything beyond ``summary()`` /
@@ -340,18 +495,20 @@ class EvalResult:
         Args:
             level: One of "features", "groups", "domains".
             split: One of "combined", "by_attribute", "by_category".
+            order: View order for "by_attribute"/"by_category",
+                ``1 <= order <= split_order`` (default ``split_order``). Lower
+                orders pool every computed slice containing each row's
+                attributes — see ``ScheduleView.view``. Ignored for "combined".
 
         Returns:
             The requested ``AggregatedResult``.
 
         Raises:
-            ValueError: If ``level`` or ``split`` is not one of the allowed values.
+            ValueError: If ``level``, ``split`` or ``order`` is out of range.
         """
         if level not in self._LEVELS:
             raise ValueError(f"level must be one of {self._LEVELS}, got {level!r}")
-        if split not in self._SPLITS:
-            raise ValueError(f"split must be one of {self._SPLITS}, got {split!r}")
-        return getattr(getattr(self, level), split)
+        return getattr(self, level).view(split, order)
 
     # --- model introspection ---
 
@@ -385,7 +542,9 @@ class EvalResult:
 
         Creates subdirectories for each schedule × split combination.
         Combined tiers are always written; split-based tiers are written only
-        when the ``EvalResult`` was produced with ``split_on``.
+        when the ``EvalResult`` was produced with ``split_on``. With
+        ``split_order > 1``, ``*_order1`` directories hold the 1st-order
+        containment views too.
         """
         out = Path(path)
         self.features.combined.save(out / "features")
@@ -398,6 +557,11 @@ class EvalResult:
             self.groups.by_category.save(out / "groups_by_category")
             self.domains.by_attribute.save(out / "domains_by_attribute")
             self.domains.by_category.save(out / "domains_by_category")
+        if self.has_splits and self._split_order > 1:
+            # Also write the 1st-order (marginal) containment views.
+            for level in self._LEVELS:
+                for split in ("by_attribute", "by_category"):
+                    self.at(level, split, order=1).save(out / f"{level}_{split}_order1")
 
 
 def _renamed(df: DataFrame, name: str, columns: list[str]) -> DataFrame:
@@ -430,7 +594,7 @@ def combine(results: dict[str, EvalResult]) -> EvalResult:
 
     Raises:
         ValueError: If `results` is empty, or inputs mix results that used
-            split_on with results that didn't.
+            split_on with results that didn't, or used different split_order.
         TypeError: If a value in `results` is not an `EvalResult`.
     """
     if not results:
@@ -445,6 +609,13 @@ def combine(results: dict[str, EvalResult]) -> EvalResult:
         raise ValueError(
             "combine(): cannot mix results with and without split_on "
             f"({has_splits}); align split_on across all inputs before combining"
+        )
+
+    split_orders = {name: r.split_order for name, r in results.items()}
+    if len(set(split_orders.values())) > 1:
+        raise ValueError(
+            "combine(): cannot mix results with different split_order "
+            f"({split_orders}); align split_order across all inputs before combining"
         )
 
     base = results[names[0]]
@@ -525,4 +696,8 @@ def combine(results: dict[str, EvalResult]) -> EvalResult:
         target_distance_weights=base.target_distance_weights.reindex(
             dist_values.index, fill_value=0.0
         ),
+        slice_assignments={
+            k: v for r in results.values() for k, v in r.slice_assignments.items()
+        },
+        split_order=base.split_order,
     )

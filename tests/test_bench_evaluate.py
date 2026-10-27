@@ -94,3 +94,44 @@ def test_bench_compare(benchmark, dataset):
     """Benchmark the full compare() pipeline at three dataset scales."""
     observed, synthetic = dataset
     benchmark(compare, observed, {"synth": synthetic})
+
+
+# Cardinalities 2/5/5/4/3 → 19 order-1 slices, 141 order-2 slices.
+SPLIT_ATTRS = {"a2": 2, "a5": 5, "b5": 5, "a4": 4, "a3": 3}
+
+
+def _split_attributes(df: DataFrame, seed: int) -> DataFrame:
+    rng = np.random.default_rng(seed)
+    pids = df.pid.unique()
+    attrs = DataFrame({"pid": pids})
+    for col, k in SPLIT_ATTRS.items():
+        attrs[col] = rng.integers(0, k, size=len(pids)).astype(str)
+    return attrs
+
+
+@pytest.fixture(scope="session")
+def split_dataset():
+    """10k persons (~50k rows) with five categorical attributes."""
+    observed = generate_population(50_000, seed=42)
+    synthetic = generate_population(50_000, seed=99)
+    return (
+        observed,
+        synthetic,
+        _split_attributes(observed, 42),
+        _split_attributes(synthetic, 99),
+    )
+
+
+@pytest.mark.parametrize("split_order", [1, 2], ids=["order1", "order2"])
+def test_bench_compare_split_order(benchmark, split_dataset, split_order):
+    """Benchmark compare() with attribute slicing at split orders 1 and 2."""
+    observed, synthetic, target_attrs, synth_attrs = split_dataset
+    benchmark(
+        compare,
+        observed,
+        {"synth": synthetic},
+        target_attributes=target_attrs,
+        synthetic_attributes={"synth": synth_attrs},
+        split_on=list(SPLIT_ATTRS),
+        split_order=split_order,
+    )
