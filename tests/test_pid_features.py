@@ -35,9 +35,9 @@ def _pop():
 
 def _assert_features_equal(a, b, label=""):
     """Assert two feature dicts are equal, with a helpful error message."""
-    assert set(a.keys()) == set(b.keys()), (
-        f"{label}: keys differ: {set(a.keys())} != {set(b.keys())}"
-    )
+    assert set(a.keys()) == set(
+        b.keys()
+    ), f"{label}: keys differ: {set(a.keys())} != {set(b.keys())}"
     for k in a:
         av, aw = a[k]
         bv, bw = b[k]
