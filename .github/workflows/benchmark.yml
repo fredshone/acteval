@@ -22,6 +22,9 @@ jobs:
 
       # Baseline and candidate run on the same runner, so the comparison is not
       # thrown off by hardware differences between GitHub-hosted machines.
+      # The baseline also runs the candidate's benchmark files, so a commit that
+      # changes the benchmark workload compares like with like. Benchmarks the
+      # baseline can't run (e.g. new API) aren't saved, so they're not compared.
       - name: Run baseline benchmarks (previous commit)
         env:
           BASE_SHA: ${{ github.event.before }}
@@ -32,10 +35,13 @@ jobs:
           echo "Baseline: $BASE_SHA"
           git worktree add "$RUNNER_TEMP/baseline" "$BASE_SHA"
           cd "$RUNNER_TEMP/baseline"
+          cp "$GITHUB_WORKSPACE"/tests/test_bench_*.py tests/
           uv sync
           uv run pytest tests/test_bench_evaluate.py tests/test_bench_pairwise.py \
             --benchmark-only \
-            --benchmark-save=baseline
+            --benchmark-save=baseline \
+            --continue-on-collection-errors \
+            || echo "Some baseline benchmarks failed; they are skipped in the comparison"
           cp -r .benchmarks "$GITHUB_WORKSPACE/.benchmarks"
 
       - name: Install dependencies
