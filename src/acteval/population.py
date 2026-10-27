@@ -5,7 +5,7 @@ from numpy import ndarray
 from pandas import DataFrame, Index
 
 from acteval._compat import _coerce_to_pandas
-from acteval.features._utils import _cumcount
+from acteval.features._utils import _check_labels_unique, _cumcount
 
 
 class Population:
@@ -202,9 +202,11 @@ class Population:
         if self._lazy_act_enum_key is None:
             compound = self.pids * self.n_act_types + self.act_codes
             cumcounts = _cumcount(compound)
-            self._lazy_act_enum_key = np.array(
+            keys = np.array(
                 [str(a) + str(c) for a, c in zip(self.acts, cumcounts)], dtype=object
             )
+            _check_labels_unique(keys, self.act_codes, cumcounts)
+            self._lazy_act_enum_key = keys
         return self._lazy_act_enum_key
 
     @property
@@ -212,9 +214,11 @@ class Population:
         """Cumcount within pid group, e.g. ["0home", "1work", "2home", ...]."""
         if self._lazy_seq_key is None:
             cumcounts = _cumcount(self.pids)
-            self._lazy_seq_key = np.array(
+            keys = np.array(
                 [str(c) + str(a) for c, a in zip(cumcounts, self.acts)], dtype=object
             )
+            _check_labels_unique(keys, cumcounts, self.act_codes)
+            self._lazy_seq_key = keys
         return self._lazy_seq_key
 
     def dense_pids_from_original(self, original_pids: ndarray) -> ndarray:

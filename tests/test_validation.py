@@ -254,3 +254,34 @@ def test_out_of_range_synthetic_gets_label():
     assert (
         "nan" not in synth_binned["age"].str.lower().values
     ), "Out-of-range synthetic age should be assigned a bin, not NaN"
+
+
+# ---------------------------------------------------------------------------
+# Schedules and attributes must cover the same pids
+# ---------------------------------------------------------------------------
+
+
+def test_target_attributes_with_pid_missing_from_schedules(observed):
+    attrs = DataFrame({"pid": [0, 1, 2], "gender": ["m", "f", "f"]})
+    with pytest.raises(ValueError, match=r"target:.*1 pid\(s\) in the attributes have no schedules \(e.g. 2\)"):
+        Evaluator(observed, target_attributes=attrs, split_on=["gender"])
+
+
+def test_target_schedules_with_pid_missing_from_attributes(observed):
+    attrs = DataFrame({"pid": [0], "gender": ["m"]})
+    with pytest.raises(ValueError, match=r"target:.*1 pid\(s\) in the schedules have no attributes \(e.g. 1\)"):
+        Evaluator(observed, target_attributes=attrs, split_on=["gender"])
+
+
+def test_model_pid_mismatch_raises_before_any_model_runs(observed, synthetic):
+    target_attrs = DataFrame({"pid": [0, 1], "gender": ["m", "f"]})
+    ev = Evaluator(observed, target_attributes=target_attrs, split_on=["gender"])
+    bad = DataFrame({"pid": [0, 5], "gender": ["m", "f"]})
+    with pytest.raises(ValueError, match="model 'b':.*no attributes.*no schedules"):
+        ev.compare(
+            {"a": synthetic, "b": synthetic},
+            attributes={"a": target_attrs, "b": bad},
+        )
+    assert not ev._precomputed  # failed before the target (or "a") was computed
+    with pytest.raises(ValueError, match="model 'b'"):
+        ev.compare_population("b", synthetic, attributes=bad)

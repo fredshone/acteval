@@ -1,3 +1,4 @@
+import pytest
 from numpy import array
 from pandas import DataFrame
 
@@ -74,3 +75,9 @@ def test_full_sequences():
         assert set(vals.tolist()) == {0, 1}
         total = int(weights.sum())
         assert total == 2
+
+
+def test_ngrams_reject_ambiguous_labels():
+    population = DataFrame({"pid": 0, "act": ["a>b", "c", "x", "a", "b>c"]})
+    with pytest.raises(ValueError, match="'a>b>c' is ambiguous"):
+        ngrams(Population(population), 2)

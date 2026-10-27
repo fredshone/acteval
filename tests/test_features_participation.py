@@ -1,3 +1,4 @@
+import pytest
 from numpy import array
 from pandas import DataFrame
 
@@ -70,3 +71,28 @@ def test_participation_rates_by_act_enum():
         ).aggregate(),
         expected,
     )
+
+
+def test_joint_participation_counts_pairs():
+    population = DataFrame(
+        [
+            {"pid": 0, "act": "home"},
+            {"pid": 0, "act": "work"},
+            {"pid": 0, "act": "home"},
+            {"pid": 0, "act": "work"},
+            {"pid": 0, "act": "home"},
+            {"pid": 1, "act": "home"},
+            {"pid": 1, "act": "work"},
+        ]
+    )
+    data = participation.joint_participation_rate(Population(population)).data
+    # Same activity: n * (n - 1) / 2 pairs; different activities: n * m.
+    assert data["home+home"][0].tolist() == [3, 0]
+    assert data["work+work"][0].tolist() == [1, 0]
+    assert data["home+work"][0].tolist() == [6, 1]
+
+
+def test_joint_participation_rejects_ambiguous_labels():
+    population = DataFrame({"pid": 0, "act": ["a+b", "c", "a", "b+c"]})
+    with pytest.raises(ValueError, match="'a\\+b\\+c' is ambiguous"):
+        participation.joint_participation_rate(Population(population))

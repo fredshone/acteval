@@ -3,6 +3,7 @@ from numpy import ndarray
 from pandas import DataFrame, MultiIndex, Series
 
 from acteval.features._pid_features import PidFeatures
+from acteval.features._utils import _ambiguous_label
 from acteval.population import Population
 
 
@@ -40,7 +41,7 @@ def ngrams(
     valid_pids = pids[valid_mask]
 
     if len(valid_ngrams) == 0:
-        return PidFeatures(data={}, bin_size=None, factor=1)
+        return PidFeatures(data={}, bin_size=None, factor=1, zero_is_missing=True)
 
     unique_ngrams, ngram_indices = np.unique(valid_ngrams, return_inverse=True)
     unique_pids, pid_indices = np.unique(valid_pids, return_inverse=True)
@@ -66,9 +67,11 @@ def ngrams(
     result_data: dict[str, tuple[ndarray, ndarray]] = {}
     for j, ng_code in enumerate(unique_ngrams):
         label = _decode_ngram(ng_code)
+        if label in result_data:
+            raise _ambiguous_label(label)
         result_data[label] = (count_matrix[:, j], unique_pids)
 
-    return PidFeatures(data=result_data, bin_size=None, factor=1)
+    return PidFeatures(data=result_data, bin_size=None, factor=1, zero_is_missing=True)
 
 
 def full_sequences(population: Population) -> PidFeatures:
@@ -88,7 +91,7 @@ def full_sequences(population: Population) -> PidFeatures:
     count_matrix = np.zeros((population.n, n_seqs), dtype=np.int64)
     count_matrix[np.arange(population.n), seq_codes] = 1
     data = {seq: (count_matrix[:, j], pids_arr) for j, seq in enumerate(unique_seqs)}
-    return PidFeatures(data=data, bin_size=None, factor=1)
+    return PidFeatures(data=data, bin_size=None, factor=1, zero_is_missing=True)
 
 
 def collect_sequence(acts: Series) -> str:

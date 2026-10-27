@@ -375,7 +375,7 @@ class EvalResult:
         # such thing as the target's distance to itself.
         self._descriptions = descriptions
         self._distances = distances
-        # Raw per-row target weight, blended into each model's own weight
+        # Raw per-row target weight, combined with each model's own weight
         # before aggregating distances (see ResultFrame.aggregate_distances).
         self._target_distance_weights = target_distance_weights
         # Attribute assignment behind each (label, cat), for lower-order views.
@@ -389,9 +389,10 @@ class EvalResult:
         """Pre-aggregation data as ``ResultFrame`` objects (desc + dist).
 
         ``descriptions`` includes the target's own value/weight as its
-        ``"target"`` column; ``distances`` covers models only. Pair with
+        ``"target"`` column; ``distances`` covers models only, with model
+        weights rescaled to the target's size within each slice. Pair with
         ``target_distance_weights`` if you need to replicate
-        ``ResultFrame.aggregate_distances``'s weight blending yourself.
+        ``ResultFrame.aggregate_distances``'s weighting yourself.
         """
         return {"descriptions": self._descriptions, "distances": self._distances}
 
@@ -407,8 +408,8 @@ class EvalResult:
 
     @property
     def target_distance_weights(self) -> Series:
-        """Raw per-row target weight used to blend into each model's own
-        weight before aggregating distances."""
+        """Raw per-row target weight, combined with each model's own weight
+        (their max) before aggregating distances."""
         return self._target_distance_weights
 
     # --- split availability ---

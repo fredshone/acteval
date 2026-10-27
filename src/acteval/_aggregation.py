@@ -126,16 +126,19 @@ def distances_to_group_level(
 
     Args:
         distances: ``ResultFrame`` at the segment level.
-        target_weights: Raw per-row target weight, for blending (see
-            ``ResultFrame.aggregate_distances``).
+        target_weights: Raw per-row target weight, in the same row order as
+            ``distances`` (see ``ResultFrame.aggregate_distances``).
         extra: Additional index levels to preserve (e.g. ``["label"]``).
         drop: Index prefix tuples to exclude before aggregating.
               Defaults to ``DEFAULT_REMOVE_FEATURES``.  Pass ``None`` or ``[]``
               to skip filtering.
     """
     grouper = ["domain", "feature"] + extra
-    rf = distances.drop_rows(drop) if drop else distances
-    return rf.aggregate_distances(grouper, target_weights=target_weights)
+    if drop:
+        # Drop the same rows from target_weights: they're combined by position.
+        target_weights = target_weights.iloc[distances.kept_positions(drop)]
+        distances = distances.drop_rows(drop)
+    return distances.aggregate_distances(grouper, target_weights=target_weights)
 
 
 def descriptions_to_domain_level(

@@ -126,23 +126,23 @@ import pandas as pd
 from acteval import compare
 
 observed = pd.DataFrame([
-    {"pid": 0, "act": "home", "start": 0,  "end": 8},
-    {"pid": 0, "act": "work", "start": 8,  "end": 16},
-    {"pid": 0, "act": "home", "start": 16, "end": 24},
-    {"pid": 1, "act": "home", "start": 0,  "end": 12},
-    {"pid": 1, "act": "shop", "start": 12, "end": 13},
-    {"pid": 1, "act": "home", "start": 13, "end": 24},
+    {"pid": 0, "act": "home", "start": 0,    "end": 480},
+    {"pid": 0, "act": "work", "start": 480,  "end": 960},
+    {"pid": 0, "act": "home", "start": 960,  "end": 1440},
+    {"pid": 1, "act": "home", "start": 0,    "end": 720},
+    {"pid": 1, "act": "shop", "start": 720,  "end": 780},
+    {"pid": 1, "act": "home", "start": 780,  "end": 1440},
 ])
 
 synthetic = pd.DataFrame([
-    {"pid": 0, "act": "home", "start": 0,  "end": 9},
-    {"pid": 0, "act": "work", "start": 9,  "end": 17},
-    {"pid": 0, "act": "home", "start": 17, "end": 24},
-    {"pid": 1, "act": "home", "start": 0,  "end": 8},
-    {"pid": 1, "act": "work", "start": 8,  "end": 16},
-    {"pid": 1, "act": "home", "start": 16, "end": 24},
-    {"pid": 2, "act": "home", "start": 0,  "end": 8},
-    {"pid": 2, "act": "home", "start": 8, "end": 24},
+    {"pid": 0, "act": "home", "start": 0,    "end": 540},
+    {"pid": 0, "act": "work", "start": 540,  "end": 1020},
+    {"pid": 0, "act": "home", "start": 1020, "end": 1440},
+    {"pid": 1, "act": "home", "start": 0,    "end": 480},
+    {"pid": 1, "act": "work", "start": 480,  "end": 960},
+    {"pid": 1, "act": "home", "start": 960,  "end": 1440},
+    {"pid": 2, "act": "home", "start": 0,    "end": 480},
+    {"pid": 2, "act": "home", "start": 480,  "end": 1440},
 ])
 
 result = compare(observed, synthetic)
@@ -151,9 +151,9 @@ print(result.summary())
 # domain
 # creativity      0.166667
 # feasibility     0.333333
-# participations  0.162037
-# timing          0.082728
-# transitions     0.380952
+# participations  0.333333
+# timing          0.261429
+# transitions     0.416667
 ```
 
 The `compare()` function also supports **batch** comparisons using `{name: DataFrame}` dict to compare several samples:
@@ -215,11 +215,13 @@ A DataFrame with one row per activity:
 |--------|------|-------------|
 | `pid` | int/str | Person identifier |
 | `act` | str | Activity label (e.g. `"home"`, `"work"`, `"shop"`) |
-| `start` | numeric | Start time (any consistent unit, e.g. hours) |
-| `end` | numeric | End time |
-| `duration` | numeric | Duration (`end - start`) |
+| `start` | numeric | Start time in minutes since midnight (e.g. `480` = 08:00) |
+| `end` | numeric | End time in minutes |
+| `duration` | numeric | Duration in minutes (`end - start`) |
 
-Any two of `start`, `end`, and `duration` are sufficient — the third is derived automatically. A polars DataFrame in the same shape works anywhere a pandas one does; it's converted internally.
+Any two of `start`, `end`, and `duration` are sufficient — the third is derived automatically.
+
+> **Times must be in minutes.** Timing features bin values into 15-minute buckets and normalise by a 1440-minute day, and `time_consistency` checks that schedules end at 1440. Other units (e.g. hours) won't raise an error but give distorted timing scores, so convert first (e.g. `df[["start", "end", "duration"]] *= 60`). A polars DataFrame in the same shape works anywhere a pandas one does; it's converted internally.
 
 ### Attributes
 
@@ -493,7 +495,7 @@ Each call returns an `AggregatedResult` with `.distances` and `.descriptions` Da
 
 #### `EvalResult.raw`
 
-`EvalResult.raw` exposes the pre-aggregation data (one `ResultFrame` each for descriptions and distances) that every level above is aggregated from — `distances` covers models only (there's no such thing as the target's distance to itself); pair it with `result.target_distance_weights` if you're building custom distance aggregations of your own.
+`EvalResult.raw` exposes the pre-aggregation data (one `ResultFrame` each for descriptions and distances) that every level above is aggregated from — `distances` covers models only (there's no such thing as the target's distance to itself); pair it with `result.target_distance_weights` if you're building custom distance aggregations of your own. Model distance weights are rescaled to the target's size within each slice, and each segment is weighted by the larger of the model and target weights when aggregating, so a segment only one side has keeps its full weight.
 
 > **Note on timing features:** A distance of `1.0` for a timing feature means the activity is *entirely absent* from the synthetic population — not just timed differently. This is treated as a maximum-penalty missing feature rather than a distributional difference.
 

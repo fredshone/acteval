@@ -3,6 +3,16 @@ from pandas import DataFrame
 from acteval.population import Population
 
 
+def _episode_hash(act, duration) -> str:
+    # repr() quotes and escapes the activity, so no activity name can run
+    # into its duration or a neighbouring episode (e.g. "a1" + 0.0 vs "a" + 10.0).
+    return f"{str(act)!r}:{float(duration)!r}"
+
+
+def _join_episodes(episodes: list[str]) -> str:
+    return ",".join(episodes)
+
+
 def hash_schedule(population: Population) -> str:
     """Hash a schedule. We first create strings of combined activities and durations.
 
@@ -13,8 +23,9 @@ def hash_schedule(population: Population) -> str:
     Returns:
         str: hashed schedule.
     """
-    act_hash = [str(a) + str(d) for a, d in zip(population.acts, population.durations)]
-    return "".join(act_hash)
+    return _join_episodes(
+        [_episode_hash(a, d) for a, d in zip(population.acts, population.durations)]
+    )
 
 
 def hash_per_pid(population: Population) -> dict:
@@ -33,9 +44,9 @@ def hash_per_pid(population: Population) -> dict:
     Returns:
         dict: Mapping of original pid → hash string.
     """
-    act_hash = [str(a) + str(d) for a, d in zip(population.acts, population.durations)]
+    act_hash = [_episode_hash(a, d) for a, d in zip(population.acts, population.durations)]
     return {
-        pid: "".join(act_hash[start:end])
+        pid: _join_episodes(act_hash[start:end])
         for pid, start, end in zip(
             population.unique_pids_original, population.pid_starts, population.pid_ends
         )

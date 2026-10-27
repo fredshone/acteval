@@ -162,3 +162,31 @@ def test_dense_pids_from_original_order_missing_and_mixed_types():
         pop.dense_pids_from_original(np.array(["a", 3], dtype=object)), [2]
     )
     assert len(pop.dense_pids_from_original(np.array([], dtype=np.int64))) == 0
+
+
+def _one_person(acts):
+    return Population(
+        DataFrame(
+            {"pid": 0, "act": acts, "start": range(len(acts)), "end": range(1, len(acts) + 1)}
+        )
+    )
+
+
+def test_act_enum_key_rejects_ambiguous_labels():
+    # "work1" (1st) and "work" (11th) would both be "work10".
+    with pytest.raises(ValueError, match="'work10' is ambiguous"):
+        _one_person(["work1"] + ["work"] * 11).act_enum_key
+
+
+def test_seq_key_rejects_ambiguous_labels():
+    # "0home" in position 1 and "home" in position 10 would both be "10home".
+    with pytest.raises(ValueError, match="'10home' is ambiguous"):
+        _one_person(["x", "0home"] + ["x"] * 8 + ["home"]).seq_key
+
+
+def test_keys_allow_digits_when_unambiguous():
+    assert list(_one_person(["work2", "home", "work2"]).act_enum_key) == [
+        "work20",
+        "home0",
+        "work21",
+    ]

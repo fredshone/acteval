@@ -25,7 +25,7 @@ from acteval._progress import bar_scope as _bar_scope
 from acteval._progress import bar_set_item as _bar_set_item
 from acteval._progress import make_bar as _make_bar
 from acteval._result_frame import ResultFrame
-from acteval._splits import _key_activities, build_slices, group_pids
+from acteval._splits import build_slices, group_pids
 from acteval.features import creativity, structural
 from acteval.population import Population
 from acteval.results import (
@@ -35,6 +35,49 @@ from acteval.results import (
     _tag_density_index,
     combine,
 )
+
+
+# Column name the target's own descriptions take alongside the model columns.
+_TARGET_COL = "target"
+# Column names the results use alongside model columns, so no model may take
+# them: the target's descriptions, and the unit column added at the feature
+# and group levels.
+_RESERVED_MODEL_NAMES = {
+    _TARGET_COL: "the target population's column",
+    "unit": "the unit column",
+}
+
+
+def _check_model_names(models) -> None:
+    for name, use in _RESERVED_MODEL_NAMES.items():
+        if name in models:
+            raise ValueError(
+                f"model name {name!r} is reserved for {use} in the results; "
+                "rename that model"
+            )
+
+
+def _check_pids_match(schedules: DataFrame, attributes: DataFrame, who: str) -> None:
+    """Raise unless *schedules* and *attributes* cover exactly the same pids."""
+    sched_pids = pd.Index(pd.unique(schedules["pid"]))
+    attr_pids = pd.Index(pd.unique(attributes["pid"]))
+    problems = []
+    for missing, has, lacks in (
+        (sched_pids.difference(attr_pids), "schedules", "attributes"),
+        (attr_pids.difference(sched_pids), "attributes", "schedules"),
+    ):
+        if len(missing):
+            examples = ", ".join(repr(p) for p in missing[:5])
+            more = ", ..." if len(missing) > 5 else ""
+            problems.append(
+                f"{len(missing)} pid(s) in the {has} have no {lacks} "
+                f"(e.g. {examples}{more})"
+            )
+    if problems:
+        raise ValueError(
+            f"{who}: schedules and attributes must cover the same persons; "
+            + "; ".join(problems)
+        )
 
 
 class Evaluator:
@@ -104,6 +147,8 @@ class Evaluator:
             target_attributes = self._apply_numeric_bins(target_attributes)
         self._target = target
         self._target_pop = Population(target)
+        if target_attributes is not None:
+            _check_pids_match(target, target_attributes, "target")
         self._config_path = config_path
         if target_attributes is None:
             target_attributes = DataFrame(
@@ -187,8 +232,8 @@ class Evaluator:
         # Phase 2: for each slice (a joint assignment of split_order attributes,
         # built in __init__), restrict the target population to the relevant
         # pids and aggregate their features. The result —
-        # (slice, sub_schedule, cached_feature_dict) — is stored in
-        # _split_cat_info so compare_population can iterate over it.
+        # (slice, sub_schedule, cached_feature_dict, n_target_persons) — is
+        # stored in _split_cat_info so compare_population can iterate over it.
         self._split_cat_info: list[tuple] = []
         for slice_, target_orig_pids in self._slices:
             target_dense_pids = self._target_pop.dense_pids_from_original(
@@ -197,12 +242,15 @@ class Evaluator:
             sub_target = self._target[self._target.pid.isin(target_orig_pids)]
             # Aggregate per-pid features down to population-level distributions
             # for each (domain, name) key — these become the "target" side
-            # of every distance calculation.
+            # of every distance calculation. Segments missing from this slice
+            # are dropped, so they get no row unless the model has them.
             cached_subset = {
-                key: pf.aggregate_subset(target_dense_pids)
+                key: pf.aggregate_present(target_dense_pids)
                 for key, pf in self._target_pid_features.items()
             }
-            self._split_cat_info.append((slice_, sub_target, cached_subset))
+            self._split_cat_info.append(
+                (slice_, sub_target, cached_subset, len(target_dense_pids))
+            )
 
         # Phase 3: build the target's per-row (value, weight, unit) Series that
         # will sit alongside the per-model columns in the final ResultFrames.
@@ -224,7 +272,7 @@ class Evaluator:
             self._progress,
             colour="cyan",
         ) as splits_bar:
-            for slice_, sub_target, cached_subset in self._split_cat_info:
+            for slice_, sub_target, cached_subset, _ in self._split_cat_info:
                 split, cat = slice_.key
                 _bar_set_item(
                     splits_bar, cat if split == "__split__" else f"{split}={cat}"
@@ -344,6 +392,7 @@ class Evaluator:
         verbose: bool = False,
     ) -> EvalResult:
         """Shared implementation behind ``Evaluator.compare``."""
+        _check_model_names(synthetic_schedules)
         self.collected_description_values = {}
         self.collected_description_weights = {}
         self.collected_distance_values = {}
@@ -371,6 +420,18 @@ class Evaluator:
                     "attributes with all split_on columns is required for every "
                     f"model when the Evaluator was initialised with splits: {details}"
                 )
+
+        # Check every model's pids up front, before any (slow) model runs;
+        # compare_population repeats this for direct callers.
+        if synthetic_attributes is not None:
+            for model, schedule in synthetic_schedules.items():
+                attrs = synthetic_attributes.get(model)
+                if attrs is not None and "pid" in attrs.columns:
+                    _check_pids_match(
+                        _coerce_to_pandas(schedule),
+                        _coerce_to_pandas(attrs),
+                        f"model '{model}'",
+                    )
 
         if not self._progress:
             if not self._precomputed:
@@ -455,6 +516,7 @@ class Evaluator:
                 (or pass ``None``) when no splits are in use.
             verbose: Print progress.
         """
+        _check_model_names([model])
         if not self._precomputed:
             self._precompute_target()
 
@@ -481,6 +543,7 @@ class Evaluator:
                 raise ValueError(
                     f"attributes DataFrame for model '{model}' is missing split column(s) {missing}"
                 )
+            _check_pids_match(schedule, attributes, f"model '{model}'")
         attributes = self._apply_numeric_bins(attributes)
         pop = Population(schedule)
 
@@ -519,7 +582,7 @@ class Evaluator:
                 attrs: group_pids(attributes, attrs)
                 for attrs in dict.fromkeys(s.attrs for s, *_ in self._split_cat_info)
             }
-            for slice_, _, cached_subset in self._split_cat_info:
+            for slice_, _, cached_subset, n_target in self._split_cat_info:
                 split, cat = slice_.key
                 _bar_set_item(
                     splits_bar, cat if split == "__split__" else f"{split}={cat}"
@@ -528,11 +591,12 @@ class Evaluator:
                     slice_.values, np.array([], dtype=attributes.pid.dtype)
                 )
                 synth_dense_pids = pop.dense_pids_from_original(sample_pids)
-                # Used below to skip density segments whose key activity is absent
-                # from this synthetic sub-population entirely.
-                synth_sub_acts = frozenset(
-                    pop.unique_acts[pop.act_count_matrix[synth_dense_pids].any(axis=0)]
-                )
+                # Model distance weights are rescaled to the target's slice size
+                # (below), so the two sides' weights are comparable whatever
+                # the sample sizes; see ResultFrame.aggregate_distances.
+                n_model = len(synth_dense_pids)
+                weight_scale = n_target / n_model if n_model else 0.0
+                slice_dist_start = len(dist_weight_parts)
 
                 if self._jobs.creativity.enabled:
                     dv, dw, xv, xw = _model_cols_creativity(
@@ -580,21 +644,12 @@ class Evaluator:
                     # fallback when the synthetic model has no data for a segment.
                     default = _make_default(obs_feat)
 
-                    # Aggregate pre-computed per-pid features for just the pids in
-                    # this split category, then drop segments where:
-                    #   - the array is empty, or
-                    #   - the segment's key activity is absent from the synthetic
-                    #     sub-population (avoids spurious missing-activity penalties).
-                    raw_synth = pid_features[key].aggregate_subset(synth_dense_pids)
-                    synth_feat = {
-                        k: v
-                        for k, v in raw_synth.items()
-                        if len(v[0]) > 0
-                        and (
-                            _key_activities(k) is None
-                            or _key_activities(k).issubset(synth_sub_acts)
-                        )
-                    }
+                    # Aggregate pre-computed per-pid features for just the pids
+                    # in this slice, dropping segments missing from it (see
+                    # PidFeatures.aggregate_present). A segment missing on both
+                    # sides gets no row; one missing on one side is scored by
+                    # _score_features' missing-segment rules.
+                    synth_feat = pid_features[key].aggregate_present(synth_dense_pids)
 
                     # w = weights, d = descriptive values, s = distance scores
                     w, d, s = _model_contribution(
@@ -611,6 +666,9 @@ class Evaluator:
                     desc_weight_parts.append(w)
                     dist_value_parts.append(s)
                     dist_weight_parts.append(dist_weight)
+
+                for i in range(slice_dist_start, len(dist_weight_parts)):
+                    dist_weight_parts[i] = dist_weight_parts[i] * weight_scale
 
                 splits_bar.update(1)
 
@@ -641,7 +699,7 @@ class Evaluator:
             aggregated output.
         """
         desc_values = concat(
-            {"target": self._target_description_values}
+            {_TARGET_COL: self._target_description_values}
             | self.collected_description_values,
             axis=1,
         )
@@ -651,7 +709,7 @@ class Evaluator:
         # treat it as real zero-weight rather than NaN propagating through the
         # weighted-average arithmetic.
         desc_weights = concat(
-            {"target": self._target_description_weights}
+            {_TARGET_COL: self._target_description_weights}
             | self.collected_description_weights,
             axis=1,
         ).fillna(0.0)

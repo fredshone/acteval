@@ -226,6 +226,37 @@ def test_order1_category_view_pools_containing_slices(order2):
     )
 
 
+def test_order1_group_view_matches_positional_pool(order2):
+    """Group-level order-1 views drop rows (DEFAULT_REMOVE_FEATURES) from
+    expanded data whose index repeats labels; target weights must still pair
+    up row by row (label alignment used to cross-multiply them)."""
+    from acteval._aggregation import DEFAULT_REMOVE_FEATURES
+    from acteval.results import _expand_to_order
+
+    dist, take, idx = _expand_to_order(
+        order2.raw["distances"], order2.slice_assignments, 1
+    )
+    target_w = order2.target_distance_weights.to_numpy()[take]
+    keep = np.array([i[:3] not in set(DEFAULT_REMOVE_FEATURES) for i in idx])
+    pool = DataFrame(
+        {
+            "v": dist.values["m"].to_numpy(),
+            "w": np.maximum(dist.weights["m"].to_numpy(), target_w),
+        },
+        index=idx,
+    )[keep]
+    pool["vw"] = pool.v * pool.w
+    grouped = pool.groupby(["domain", "feature", "label", "cat"])
+    expected = grouped.vw.sum() / grouped.w.sum()
+
+    got = order2.at("groups", "by_category", order=1).distances["m"]
+    pd.testing.assert_series_equal(
+        got.sort_index(), expected.sort_index(), check_names=False
+    )
+    probs = order2.at("domains", "by_category", order=1).distances["m"]
+    assert probs.loc[["creativity", "feasibility"]].between(0, 1).all()
+
+
 def test_view_order_out_of_range(order2):
     with pytest.raises(ValueError, match="order must be between 1 and split_order=2"):
         order2.at("domains", "by_attribute", order=3)

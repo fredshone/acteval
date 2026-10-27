@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
+import numpy as np
 from pandas import DataFrame, Series
 
 
@@ -50,15 +51,21 @@ class ResultFrame:
         """
         if not keys:
             return self
-        n = len(keys[0])
-        key_set = set(keys)
-        mask = [idx[:n] not in key_set for idx in self.values.index]
-        iloc = [i for i, m in enumerate(mask) if m]
+        iloc = self.kept_positions(keys)
         return ResultFrame(
             values=self.values.iloc[iloc],
             weights=self.weights.iloc[iloc],
             units=self.units.iloc[iloc] if self.units is not None else None,
         )
+
+    def kept_positions(self, keys: Sequence[tuple]) -> list[int]:
+        """Row positions ``drop_rows(keys)`` keeps, for dropping the same rows
+        from a Series aligned to this frame (e.g. target weights)."""
+        if not keys:
+            return list(range(len(self.values)))
+        n = len(keys[0])
+        key_set = set(keys)
+        return [i for i, idx in enumerate(self.values.index) if idx[:n] not in key_set]
 
     # ------------------------------------------------------------------
     # Aggregation
@@ -82,23 +89,37 @@ class ResultFrame:
     def aggregate_distances(
         self, groupby: list[str], target_weights: Series
     ) -> "ResultFrame":
-        """Asymmetric weighted average aggregation (for distances).
+        """Weighted average aggregation for distances, using both sides' weights.
 
-        Averages each model's weight with the target's weight before computing
-        the weighted mean. This handles asymmetric feature coverage: a feature
-        present in only one side gets half-weight rather than zero-weight.
+        Each row is weighted by the larger of the model's and the target's
+        weight, so a segment present on only one side (e.g. an activity the
+        model never produces, or one it invents) keeps that side's full weight.
+        Model weights are already rescaled to the target's slice size (see
+        ``Evaluator.compare_population``), so neither side dominates because
+        of its sample size.
 
-            ``combined_w = (weights[c] + target_weights) / 2``
+            ``combined_w = max(weights[c], target_weights)``
             ``agg[c] = sum(values[c] * combined_w) / sum(combined_w)``
 
         Args:
-            target_weights: Raw per-row target weight, aligned to this
-                ``ResultFrame``'s index.
+            target_weights: Raw per-row target weight, in the same row order
+                as this ``ResultFrame``. Combined by position, not by label:
+                lower-order views repeat index labels, which label alignment
+                would cross-multiply.
         """
+        if len(target_weights) != len(self.values):
+            raise ValueError(
+                f"target_weights has {len(target_weights)} rows, expected "
+                f"{len(self.values)} (one per row, in the same order)"
+            )
+        target = target_weights.to_numpy(dtype=float)
         agg_values: dict[str, Series] = {}
         agg_weights: dict[str, Series] = {}
         for col in self.values.columns:
-            combined_w = (self.weights[col] + target_weights) / 2
+            combined_w = Series(
+                np.maximum(self.weights[col].to_numpy(dtype=float), target),
+                index=self.values.index,
+            )
             total = combined_w.groupby(groupby).sum()
             weighted = (self.values[col].mul(combined_w)).groupby(groupby).sum()
             agg_values[col] = (weighted / total).fillna(0.0)
