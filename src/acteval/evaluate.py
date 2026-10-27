@@ -36,7 +36,6 @@ from acteval.results import (
     combine,
 )
 
-
 # Column name the target's own descriptions take alongside the model columns.
 _TARGET_COL = "target"
 # Column names the results use alongside model columns, so no model may take

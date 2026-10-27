@@ -167,7 +167,12 @@ def test_dense_pids_from_original_order_missing_and_mixed_types():
 def _one_person(acts):
     return Population(
         DataFrame(
-            {"pid": 0, "act": acts, "start": range(len(acts)), "end": range(1, len(acts) + 1)}
+            {
+                "pid": 0,
+                "act": acts,
+                "start": range(len(acts)),
+                "end": range(1, len(acts) + 1),
+            }
         )
     )
 

@@ -20,10 +20,7 @@ def test_hash_schedule():
             {"pid": 0, "act": "home", "duration": 10},
         ]
     )
-    assert (
-        hash_schedule(Population(schedule))
-        == "'home':10.0,'work':10.0,'home':10.0"
-    )
+    assert hash_schedule(Population(schedule)) == "'home':10.0,'work':10.0,'home':10.0"
 
 
 def test_hash_population_no_collisions():

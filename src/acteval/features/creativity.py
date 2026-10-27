@@ -44,7 +44,9 @@ def hash_per_pid(population: Population) -> dict:
     Returns:
         dict: Mapping of original pid → hash string.
     """
-    act_hash = [_episode_hash(a, d) for a, d in zip(population.acts, population.durations)]
+    act_hash = [
+        _episode_hash(a, d) for a, d in zip(population.acts, population.durations)
+    ]
     return {
         pid: _join_episodes(act_hash[start:end])
         for pid, start, end in zip(

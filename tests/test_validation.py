@@ -263,13 +263,19 @@ def test_out_of_range_synthetic_gets_label():
 
 def test_target_attributes_with_pid_missing_from_schedules(observed):
     attrs = DataFrame({"pid": [0, 1, 2], "gender": ["m", "f", "f"]})
-    with pytest.raises(ValueError, match=r"target:.*1 pid\(s\) in the attributes have no schedules \(e.g. 2\)"):
+    with pytest.raises(
+        ValueError,
+        match=r"target:.*1 pid\(s\) in the attributes have no schedules \(e.g. 2\)",
+    ):
         Evaluator(observed, target_attributes=attrs, split_on=["gender"])
 
 
 def test_target_schedules_with_pid_missing_from_attributes(observed):
     attrs = DataFrame({"pid": [0], "gender": ["m"]})
-    with pytest.raises(ValueError, match=r"target:.*1 pid\(s\) in the schedules have no attributes \(e.g. 1\)"):
+    with pytest.raises(
+        ValueError,
+        match=r"target:.*1 pid\(s\) in the schedules have no attributes \(e.g. 1\)",
+    ):
         Evaluator(observed, target_attributes=attrs, split_on=["gender"])
 
 

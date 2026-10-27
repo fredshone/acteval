@@ -160,10 +160,12 @@ def test_segments_missing_from_a_slice():
         split_on=["g"],
     )
     distances = result.raw["distances"]
-    rate = distances.values["m"].sort_index().loc[
-        ("participations", "participation rate")
-    ]
-    segments = {cat: set(rate.xs(cat, level="cat").index.get_level_values(0)) for cat in "ab"}
+    rate = (
+        distances.values["m"].sort_index().loc[("participations", "participation rate")]
+    )
+    segments = {
+        cat: set(rate.xs(cat, level="cat").index.get_level_values(0)) for cat in "ab"
+    }
     # Missing on both sides: no row. Missing on one side: still scored.
     assert segments == {"a": {"home", "work", "gym"}, "b": {"home", "shop"}}
     assert rate[("gym", "g", "a")] == 1.0  # model-only: gym count vs zero
@@ -173,9 +175,11 @@ def test_segments_missing_from_a_slice():
     target_w = result.target_distance_weights.sort_index().loc[
         ("participations", "participation rate")
     ]
-    model_w = distances.weights["m"].sort_index().loc[
-        ("participations", "participation rate")
-    ]
+    model_w = (
+        distances.weights["m"]
+        .sort_index()
+        .loc[("participations", "participation rate")]
+    )
     assert target_w[("work", "g", "a")] == 10
     assert model_w[("work", "g", "a")] == 10
     assert target_w[("gym", "g", "a")] == 0
