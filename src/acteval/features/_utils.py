@@ -85,6 +85,29 @@ def _cumcount(group_keys):
     return result
 
 
+def _ambiguous_label(label: str) -> ValueError:
+    """Error for a feature label built from activity names that two different
+    segments share (e.g. ``"work1"`` + ``"0"`` and ``"work"`` + ``"10"``)."""
+    return ValueError(
+        f"feature label {label!r} is ambiguous: activity names combine into the "
+        "same label for different segments; rename the activities involved "
+        "(e.g. avoid names ending or starting in digits, or containing '+' or '>')"
+    )
+
+
+def _check_labels_unique(labels: ndarray, *codes: ndarray) -> None:
+    """Raise if any label in *labels* stands for more than one segment, where
+    *codes* are integer arrays that together identify the segment each label
+    was built from (e.g. activity code and occurrence count)."""
+    if len(labels) == 0:
+        return
+    _, label_idx = np.unique(labels.astype(str), return_inverse=True)
+    pairs = np.unique(np.column_stack([label_idx, *codes]), axis=0)
+    if len(pairs) != len(np.unique(label_idx)):
+        clash = pairs[np.flatnonzero(np.diff(pairs[:, 0]) == 0)[0], 0]
+        raise _ambiguous_label(labels[np.flatnonzero(label_idx == clash)[0]])
+
+
 def _grouped_sum(keys, values):
     """Sum values per group key.
 

@@ -1,6 +1,11 @@
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
 import pytest
 from pandas import DataFrame
 
+import acteval
 from acteval.evaluate import Evaluator, compare
 
 
@@ -91,3 +96,112 @@ def test_models_with_different_activity_coverage_have_no_nan_distances(
     # (e.g. m1's "home+leisure" pair rate) — that's informational, not a bug.
     assert not result.domains.combined.distances.isna().any().any()
     assert not result.groups.combined.distances.drop(columns="unit").isna().any().any()
+
+
+@pytest.mark.parametrize("odd_act", ["work2", "a>b", "c+d"])
+def test_identical_populations_score_zero_with_unusual_act_names(odd_act, tmp_path):
+    # Activity names with trailing digits, ">" or "+" used to be mis-parsed
+    # out of feature keys, so their segments looked missing from the model.
+    config = (Path(acteval.__file__).parent / "config.toml").read_text()
+    config = config.replace("seq_rates   = false", "seq_rates   = true")
+    config = config.replace("full_sequences = false", "full_sequences = true")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(config)
+
+    rows = []
+    for pid in range(20):
+        shift = 15 * (pid % 4)
+        rows += [
+            {"pid": pid, "act": "home", "start": 0, "end": 480 + shift},
+            {"pid": pid, "act": odd_act, "start": 480 + shift, "end": 1020},
+            {"pid": pid, "act": "home", "start": 1020, "end": 1440},
+        ]
+    df = DataFrame(rows)
+    result = compare(df, {"m": df.copy()}, config_path=config_path)
+    distances = result.features.combined.distances["m"]
+    density = distances.drop(["creativity", "feasibility"], level="domain")
+    assert (density == 0).all(), density[density != 0]
+
+
+@pytest.mark.parametrize("name", ["target", "unit"])
+def test_reserved_model_names_are_rejected(name, observed, synthetic):
+    with pytest.raises(ValueError, match=f"'{name}' is reserved"):
+        compare(observed, {name: synthetic})
+    with pytest.raises(ValueError, match=f"'{name}' is reserved"):
+        Evaluator(observed).compare_population(name, synthetic)
+
+
+def test_segments_missing_from_a_slice():
+    # Slice "a" does home/work, slice "b" home/shop, in both populations; the
+    # model also adds "gym" to slice "a" only.
+    def schedules(pids, act, extra=None):
+        rows = []
+        for pid in pids:
+            acts = ["home", act] + ([extra] if extra else []) + ["home"]
+            bounds = np.linspace(0, 1440, len(acts) + 1)
+            rows += [
+                {"pid": pid, "act": a, "start": s, "end": e}
+                for a, s, e in zip(acts, bounds[:-1], bounds[1:])
+            ]
+        return rows
+
+    target = DataFrame(schedules(range(10), "work") + schedules(range(10, 16), "shop"))
+    model = DataFrame(
+        schedules(range(8), "work", "gym") + schedules(range(8, 12), "shop")
+    )
+    attrs = lambda n_a, n_b: DataFrame(  # noqa: E731
+        {"pid": range(n_a + n_b), "g": ["a"] * n_a + ["b"] * n_b}
+    )
+    result = compare(
+        target,
+        {"m": model},
+        target_attributes=attrs(10, 6),
+        synthetic_attributes={"m": attrs(8, 4)},
+        split_on=["g"],
+    )
+    distances = result.raw["distances"]
+    rate = (
+        distances.values["m"].sort_index().loc[("participations", "participation rate")]
+    )
+    segments = {
+        cat: set(rate.xs(cat, level="cat").index.get_level_values(0)) for cat in "ab"
+    }
+    # Missing on both sides: no row. Missing on one side: still scored.
+    assert segments == {"a": {"home", "work", "gym"}, "b": {"home", "shop"}}
+    assert rate[("gym", "g", "a")] == 1.0  # model-only: gym count vs zero
+
+    # Weights are the slice's head counts, not the whole population's, with
+    # the model's rescaled to the target's slice size (8 model people → 10).
+    target_w = result.target_distance_weights.sort_index().loc[
+        ("participations", "participation rate")
+    ]
+    model_w = (
+        distances.weights["m"]
+        .sort_index()
+        .loc[("participations", "participation rate")]
+    )
+    assert target_w[("work", "g", "a")] == 10
+    assert model_w[("work", "g", "a")] == 10
+    assert target_w[("gym", "g", "a")] == 0
+    assert model_w[("gym", "g", "a")] == 10
+    assert target_w[("shop", "g", "b")] == 6
+    assert model_w[("shop", "g", "b")] == 6
+
+
+def test_distance_weights_use_max_of_both_sides():
+    from acteval._result_frame import ResultFrame
+
+    idx = pd.MultiIndex.from_tuples(
+        [("d", "f", "x"), ("d", "f", "y"), ("d", "f", "z")],
+        names=["domain", "feature", "segment"],
+    )
+    rf = ResultFrame(
+        values=DataFrame({"m": [0.0, 1.0, 0.5]}, index=idx),
+        weights=DataFrame({"m": [10.0, 0.0, 4.0]}, index=idx),
+        units=pd.Series("EMD", index=idx),
+    )
+    target = pd.Series([10.0, 10.0, 2.0], index=idx)
+    agg = rf.aggregate_distances(["domain", "feature"], target_weights=target)
+    # weights: max(10,10)=10, max(0,10)=10 (target-only keeps full weight), max(4,2)=4
+    assert agg.values["m"].iloc[0] == pytest.approx((0 * 10 + 1 * 10 + 0.5 * 4) / 24)
+    assert agg.weights["m"].iloc[0] == 24

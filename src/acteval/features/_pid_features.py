@@ -23,11 +23,15 @@ class PidFeatures:
             array and *pids* is a same-length array of dense pid ints.
         bin_size: Optional bin size forwarded to ``compress_feature``.
         factor: Divisor forwarded to ``compress_feature``.
+        zero_is_missing: True for count features (e.g. participation
+            counts), where a segment that is zero for everyone means it didn't
+            occur, so ``aggregate_present`` treats it as missing.
     """
 
     data: dict[str, tuple[ndarray, ndarray]]
     bin_size: int | None = None
     factor: int = 1
+    zero_is_missing: bool = False
 
     # Internal cache: ``key`` → ``(scaled_uniques, inverse)``, so repeated
     # ``aggregate_subset`` calls count codes instead of re-sorting values.
@@ -56,6 +60,7 @@ class PidFeatures:
             data=new_data,
             bin_size=self.bin_size,
             factor=self.factor,
+            zero_is_missing=self.zero_is_missing,
         )
 
     def aggregate(self) -> dict[str, tuple[ndarray, ndarray]]:
@@ -112,3 +117,16 @@ class PidFeatures:
             else:
                 result[key] = (uniques[present], counts[present].astype(np.int64))
         return result
+
+    def aggregate_present(self, pid_set: ndarray) -> dict[str, tuple[ndarray, ndarray]]:
+        """``aggregate_subset`` without the segments missing from *pid_set*:
+        those with no values, or, when ``zero_is_missing``, only zeros.
+
+        Args:
+            pid_set: 1-D array of dense pid ints to keep.
+        """
+        return {
+            k: (values, weights)
+            for k, (values, weights) in self.aggregate_subset(pid_set).items()
+            if len(values) > 0 and not (self.zero_is_missing and not values.any())
+        }

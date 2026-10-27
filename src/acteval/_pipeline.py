@@ -25,7 +25,7 @@ same MultiIndex ``(domain, feature, segment)`` and column set, plus a
 ``units`` Series. ``descriptions`` has one column per model plus a ``"target"``
 column; ``distances`` has one column per model only (there's no such thing as
 the target's distance to itself) — the target's distance-side weight, used
-only to blend into each model's own weight before aggregating, is tracked
+only to combine with each model's own weight (their max) before aggregating, is tracked
 separately (see ``Evaluator._target_distance_weights`` / ``EvalResult``).
 
 ## ``missing_distance``

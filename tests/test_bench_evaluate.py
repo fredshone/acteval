@@ -41,7 +41,7 @@ def generate_population(
 
     Returns:
         DataFrame with columns pid, act, start, end, duration.
-        Each person's episodes tile [0, 24) exactly.
+        Each person's episodes tile [0, 1440) minutes exactly.
     """
     rng = np.random.default_rng(seed)
     acts = np.array(ACTIVITIES[:n_activities])
@@ -57,12 +57,12 @@ def generate_population(
     # Activity for each episode (random)
     act_col = acts[rng.integers(0, len(acts), size=total_rows)]
 
-    # Durations: random weights normalised so each person's episodes sum to 24
+    # Durations: random weights normalised so each person's episodes sum to 1440 minutes
     weights = rng.uniform(0.5, 3.0, size=total_rows)
     boundaries = np.concatenate([[0], eps_per_person.cumsum()[:-1]])
     person_sums = np.add.reduceat(weights, boundaries)
     norm = np.repeat(person_sums, eps_per_person)
-    durations = weights / norm * 24.0
+    durations = weights / norm * 1440.0
 
     # Starts: cumulative sum of durations within each person, reset at boundaries
     dur_groups = np.split(durations, eps_per_person.cumsum()[:-1])

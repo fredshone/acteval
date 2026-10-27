@@ -20,7 +20,18 @@ def test_hash_schedule():
             {"pid": 0, "act": "home", "duration": 10},
         ]
     )
-    assert hash_schedule(Population(schedule)) == "home10work10home10"
+    assert hash_schedule(Population(schedule)) == "'home':10.0,'work':10.0,'home':10.0"
+
+
+def test_hash_population_no_collisions():
+    # Without separators "a1"+0.0 and "a"+10.0 would both hash to "a10.0".
+    population = DataFrame(
+        [
+            {"pid": 0, "act": "a1", "duration": 0.0},
+            {"pid": 1, "act": "a", "duration": 10.0},
+        ]
+    )
+    assert len(hash_population(Population(population))) == 2
 
 
 def test_hash_population():
@@ -34,8 +45,8 @@ def test_hash_population():
         ]
     )
     assert hash_population(Population(population)) == {
-        "home10work10",
-        "home10work10home10",
+        "'home':10.0,'work':10.0",
+        "'home':10.0,'work':10.0,'home':10.0",
     }
 
 

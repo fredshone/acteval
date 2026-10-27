@@ -11,7 +11,7 @@ pip install acteval
 pandas (or polars) DataFrame, one row per activity episode:
 - pid — person identifier (int or str)
 - act — activity label (str, e.g. "home", "work", "shop")
-- start — episode start time (numeric, any consistent unit)
+- start — episode start time (numeric, minutes since midnight; other units distort timing scores)
 - end — episode end time (numeric)
 - duration — episode duration (numeric)
 
