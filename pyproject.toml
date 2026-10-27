@@ -1,6 +1,6 @@
 [project]
 name = "acteval"
-version = "0.2.0"
+version = "0.3.0"
 description = "Standalone library for evaluating activity sequences"
 requires-python = ">=3.10"
 license = "MIT"
@@ -18,8 +18,8 @@ dependencies = [
     "tqdm",
 ]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest",
     "pytest-cov",
     "pytest-benchmark",
