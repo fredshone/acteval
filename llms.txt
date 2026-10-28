@@ -1,6 +1,6 @@
 # acteval
 
-> Python library for evaluating synthetic activity schedules: given daily sequences of who-did-what-and-when, measures how well a synthetic population reproduces observed distributions across frequencies, timing, transitions, participation rates, and novelty. Distances are 0–1 (lower is better).
+> Python library for evaluating synthetic activity schedules: given daily sequences of who-did-what-and-when, measures how well a synthetic population reproduces observed distributions across frequencies, timing, transitions, participation rates, and novelty. Lower distances are better; probabilities and timing distances are 0–1, count-feature EMDs can exceed 1.
 
 ## Install
 
@@ -95,6 +95,16 @@ result.target_distance_weights to replicate the weighted aggregation yourself.
 - sequences      — full abbreviated tour-string distributions (e.g. "h>w>h"); off by default
 
 Missing activity penalty: 1.0 (maximum) for timing; None (compute on available data) for participation/transitions.
+
+Levels: segment (one distribution, e.g. "home>work" or "work0") → feature/group
+(e.g. "2-gram") → domain (e.g. "transitions"). Slices: attribute = split_on
+column (index level "label"), category = one value of it ("cat"); without
+split_on there is one slice (label="__split__", cat="all").
+Aggregation: segments → groups by weighted average, weight = max(target, model)
+count of the segment within its slice: how many times it occurs (n-grams,
+activities, episodes; one per person for lengths/creativity/feasibility), with
+model counts rescaled to the target slice size.
+Groups → domains: unweighted mean. Slices pool through the same weighted average.
 
 list_features() enumerates every feature function with its domain/config key.
 list_disable_keys() enumerates every dotted disable=[...] path (e.g. "jobs.creativity.novelty").

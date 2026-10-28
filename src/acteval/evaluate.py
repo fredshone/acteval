@@ -199,17 +199,60 @@ class Evaluator:
         lines.append(")")
         return "\n".join(lines)
 
-    def _apply_numeric_bins(self, attributes: DataFrame) -> DataFrame:
-        """Replace numeric split columns with ordinal bin labels using stored edges."""
+    def _apply_numeric_bins(
+        self, attributes: DataFrame, source: str = "attributes"
+    ) -> DataFrame:
+        """Replace numeric split columns with ordinal bin labels using stored edges.
+
+        Raises a ValueError naming the column and ``source`` if a column that
+        was binned in the target attributes is not numeric here.
+        """
         if not self._numeric_bins:
             return attributes
         attributes = attributes.copy()
         for col, (edges, labels) in self._numeric_bins.items():
             if col in attributes.columns:
+                series = attributes[col]
+                if not pd.api.types.is_numeric_dtype(series):
+                    bad = series[pd.to_numeric(series, errors="coerce").isna()]
+                    bad = bad[bad.notna()].unique()[:5].tolist()
+                    raise ValueError(
+                        f"split_on column '{col}' is numeric in target_attributes "
+                        f"(binned into {len(labels)} ordinal bins) but has dtype "
+                        f"{series.dtype} in {source}; example non-numeric values: "
+                        f"{bad}. Make the column numeric in both, or categorical "
+                        f"in both."
+                    )
                 attributes[col] = pd.cut(
                     attributes[col], bins=edges, labels=labels, include_lowest=True
                 ).astype(str)
         return attributes
+
+    def _warn_disjoint_categories(self, attributes: DataFrame, model: str) -> None:
+        """Warn if a split column shares no values with the target attributes.
+
+        Usually a dtype mismatch (e.g. ``1`` vs ``"1"``), which would otherwise
+        silently leave every synthetic split empty.
+        """
+        for col in self._split_on:
+            target_vals = set(self._target_attributes[col].dropna().unique())
+            synth_vals = set(attributes[col].dropna().unique())
+            if not synth_vals or target_vals & synth_vals:
+                continue
+            hint = ""
+            if {str(v) for v in target_vals} & {str(v) for v in synth_vals}:
+                hint = (
+                    f" Values match as strings, so this looks like a dtype "
+                    f"mismatch ({self._target_attributes[col].dtype} in target "
+                    f"vs {attributes[col].dtype} in model '{model}')."
+                )
+            warnings.warn(
+                f"split_on column '{col}' for model '{model}' shares no values "
+                f"with target_attributes, so every split will be empty for this "
+                f"model.{hint}",
+                UserWarning,
+                stacklevel=3,
+            )
 
     def _precompute_target(self, feature_bar=None, splits_bar=None) -> None:
         # Phase 1: run every feature function over the full target population,
@@ -310,7 +353,9 @@ class Evaluator:
                 for spec in self._jobs.density:
                     key = (spec.domain, spec.name)
                     obs_feat = cached_subset[key]
-                    value, weight, _ = _observed_base(spec, obs_feat)
+                    value, weight, _ = _observed_base(
+                        spec, obs_feat, self._target_pid_features[key].zero_is_missing
+                    )
                     value = _tag_density_index(
                         value, spec.domain, spec.name, split, cat
                     )
@@ -543,7 +588,10 @@ class Evaluator:
                     f"attributes DataFrame for model '{model}' is missing split column(s) {missing}"
                 )
             _check_pids_match(schedule, attributes, f"model '{model}'")
-        attributes = self._apply_numeric_bins(attributes)
+            attributes = self._apply_numeric_bins(
+                attributes, f"attributes for model '{model}'"
+            )
+            self._warn_disjoint_categories(attributes, model)
         pop = Population(schedule)
 
         pid_features = {}
@@ -648,11 +696,17 @@ class Evaluator:
                     # PidFeatures.aggregate_present). A segment missing on both
                     # sides gets no row; one missing on one side is scored by
                     # _score_features' missing-segment rules.
-                    synth_feat = pid_features[key].aggregate_present(synth_dense_pids)
+                    synth_pf = pid_features[key]
+                    synth_feat = synth_pf.aggregate_present(synth_dense_pids)
 
                     # w = weights, d = descriptive values, s = distance scores
                     w, d, s = _model_contribution(
-                        model, spec, obs_feat, synth_feat, default
+                        model,
+                        spec,
+                        obs_feat,
+                        synth_feat,
+                        default,
+                        synth_pf.zero_is_missing,
                     )
                     dist_weight = w.reindex(s.index, fill_value=0)
                     w = _tag_density_index(w, spec.domain, spec.name, split, cat)

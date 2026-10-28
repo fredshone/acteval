@@ -256,6 +256,48 @@ def test_out_of_range_synthetic_gets_label():
     ), "Out-of-range synthetic age should be assigned a bin, not NaN"
 
 
+def _numeric_age_evaluator(schedule):
+    ages = [20.0, 25.5, 30.0, 35.5, 40.0, 45.5, 50.0, 55.5, 60.0, 65.5]
+    target_attrs = DataFrame({"pid": list(range(10)), "age": ages})
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return Evaluator(schedule, target_attrs, ["age"]), ages
+
+
+def test_string_synthetic_column_for_numeric_target_raises():
+    schedule = _make_numeric_fixtures()
+    ev, ages = _numeric_age_evaluator(schedule)
+    synth_attrs = DataFrame({"pid": list(range(10)), "age": [str(a) for a in ages]})
+    with pytest.raises(ValueError, match=r"'age' is numeric.*attributes for model 'm'"):
+        ev.compare_population("m", schedule, synth_attrs)
+
+
+def test_mixed_synthetic_column_for_numeric_target_raises():
+    schedule = _make_numeric_fixtures()
+    ev, ages = _numeric_age_evaluator(schedule)
+    synth_attrs = DataFrame({"pid": list(range(10)), "age": ages[:9] + ["unknown"]})
+    with pytest.raises(ValueError, match=r"example non-numeric values: \['unknown'\]"):
+        ev.compare_population("m", schedule, synth_attrs)
+
+
+def test_disjoint_categories_warns_with_dtype_hint():
+    schedule = _make_numeric_fixtures()
+    target_attrs = DataFrame({"pid": list(range(10)), "employed": ["0", "1"] * 5})
+    synth_attrs = DataFrame({"pid": list(range(10)), "employed": [0, 1] * 5})
+    ev = Evaluator(schedule, target_attrs, ["employed"])
+    with pytest.warns(UserWarning, match=r"'employed'.*shares no values.*dtype"):
+        ev.compare_population("m", schedule, synth_attrs)
+
+
+def test_overlapping_categories_no_warning():
+    schedule = _make_numeric_fixtures()
+    attrs = DataFrame({"pid": list(range(10)), "employed": [0, 1] * 5})
+    ev = Evaluator(schedule, attrs, ["employed"])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        ev.compare_population("m", schedule, attrs)
+
+
 # ---------------------------------------------------------------------------
 # Schedules and attributes must cover the same pids
 # ---------------------------------------------------------------------------

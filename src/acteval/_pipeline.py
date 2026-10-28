@@ -41,6 +41,7 @@ from typing import Callable
 import numpy as np
 from pandas import DataFrame, MultiIndex, Series, concat
 
+from acteval._aggregation import segment_count
 from acteval._jobs import CreativityConfig, JobSpec, StructuralConfig
 from acteval._result_frame import ResultFrame
 from acteval.features import creativity, structural
@@ -82,7 +83,7 @@ def _aggregate_features(
 
 
 def _observed_base(
-    spec: JobSpec, observed_features: dict
+    spec: JobSpec, observed_features: dict, per_person_counts: bool
 ) -> tuple[Series, Series, tuple]:
     """Build the target-only base rows for a feature spec.
 
@@ -91,7 +92,7 @@ def _observed_base(
     here; the caller sets it after stacking specs.
     """
     default = _make_default(observed_features)
-    weight = spec.size_fn(observed_features)
+    weight = segment_count(observed_features, per_person_counts)
     value = spec.describe_fn(observed_features)
     order = (
         DataFrame({"weight": weight, "value": value})
@@ -107,9 +108,10 @@ def _model_contribution(
     obs_features: dict,
     synth_features: dict,
     default: tuple,
+    per_person_counts: bool,
 ) -> tuple[Series, Series, Series]:
     """Compute weight, description, and distance columns for one model × one spec."""
-    synth_weight = spec.size_fn(synth_features)
+    synth_weight = segment_count(synth_features, per_person_counts)
     desc = _describe_feature(model, synth_features, spec.describe_fn)
     dist = _score_features(
         model,

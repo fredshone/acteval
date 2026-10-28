@@ -205,3 +205,55 @@ def test_distance_weights_use_max_of_both_sides():
     # weights: max(10,10)=10, max(0,10)=10 (target-only keeps full weight), max(4,2)=4
     assert agg.values["m"].iloc[0] == pytest.approx((0 * 10 + 1 * 10 + 0.5 * 4) / 24)
     assert agg.weights["m"].iloc[0] == 24
+
+
+def test_segment_weights_count_occurrences_for_every_feature_layout():
+    # 60 people, each home twice and work or shop once.
+    acts = [["home", "work", "home"], ["home", "shop", "home"]] * 30
+    result = compare(_schedules(acts), _schedules(acts))
+    target = result.target_distance_weights.droplevel(["label", "cat"]).sort_index()
+    # count features: occurrences summed over people
+    assert target.loc[("participations", "participation rate", "home")] == 120
+    assert target.loc[("participations", "participation rate", "work")] == 30
+    assert target.loc[("transitions", "2-gram", "home>work")] == 30
+    # timing: one value per episode
+    assert target.loc[("timing", "start times", "home0")] == 60
+    assert target.loc[("timing", "start times", "work0")] == 30
+    # one per person
+    assert target.loc[("participations", "lengths", "sequence lengths")] == 60
+    assert target.loc[("creativity", "homogeneity", "all")] == 60
+
+
+def _schedules(acts_per_pid):
+    rows = []
+    for pid, acts in enumerate(acts_per_pid):
+        step = 1440 // len(acts)
+        for i, act in enumerate(acts):
+            end = 1440 if i == len(acts) - 1 else (i + 1) * step
+            rows.append((pid, act, i * step, end))
+    return DataFrame(rows, columns=["pid", "act", "start", "end"])
+
+
+def test_rare_invented_ngrams_barely_dilute_transitions():
+    # Both models make the same errors on the observed n-grams (55/45 instead
+    # of 50/50 work/shop); "novel" also extends 3 schedules with invented
+    # activities. Weighted by people, those invented n-grams cut its distance
+    # by 20-27%; weighted by occurrences they carry weight 3 against ~50 per
+    # observed n-gram, so they can only nudge it.
+    hwh, hsh = ["home", "work", "home"], ["home", "shop", "home"]
+    extended = hwh + ["escort", "medical", "escort", "home"]
+    observed = _schedules([hwh] * 50 + [hsh] * 50)
+    conservative = _schedules([hwh] * 55 + [hsh] * 45)
+    novel = _schedules([extended] * 3 + [hwh] * 52 + [hsh] * 45)
+    result = compare(observed, {"conservative": conservative, "novel": novel})
+
+    weights = result.raw["distances"].weights["novel"].sort_index()
+    assert weights.loc[("transitions", "2-gram", "escort>medical")].item() == 3
+    # the 3 extended schedules also contain home>work
+    assert weights.loc[("transitions", "2-gram", "home>work")].item() == 55
+
+    groups = result.groups.combined.distances
+    for feature in ("2-gram", "3-gram"):
+        row = groups.loc[("transitions", feature)]
+        assert row["conservative"] == pytest.approx(0.05)
+        assert row["novel"] >= 0.95 * row["conservative"]

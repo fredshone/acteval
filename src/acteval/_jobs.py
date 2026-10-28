@@ -10,7 +10,7 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
-from acteval._aggregation import average, average2d, feature_weight, time_average
+from acteval._aggregation import average, average2d, time_average
 from acteval.distance import emd
 from acteval.features import participation, structural, times
 from acteval.features.transitions import full_sequences, ngrams
@@ -23,7 +23,6 @@ class JobSpec:
     domain: str
     name: str
     feature_fn: Callable
-    size_fn: Callable
     description_name: str
     describe_fn: Callable
     distance_name: str
@@ -338,7 +337,6 @@ def build_density_jobs(cfg: dict) -> list[JobSpec]:
             domain=domain,
             name=name,
             feature_fn=feature_fn,
-            size_fn=feature_weight,
             description_name=description_name,
             describe_fn=describe_fn,
             distance_name="EMD",

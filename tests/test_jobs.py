@@ -21,7 +21,6 @@ def test_all_jobs_have_required_fields():
         assert spec.domain in {"participations", "transitions", "timing"}
         assert isinstance(spec.name, str) and spec.name
         assert callable(spec.feature_fn)
-        assert callable(spec.size_fn)
         assert callable(spec.describe_fn)
         assert callable(spec.distance_fn)
         assert spec.missing_distance in {None, 1.0}
