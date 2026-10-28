@@ -98,20 +98,8 @@ class ResultFrame:
         ``Evaluator.compare_population``), so neither side dominates because
         of its sample size.
 
-        The denominator only counts rows the target has (``target_weights >
-        0``): rows only the model has (e.g. invented n-grams) add to the
-        numerator but not the denominator, so they can only increase the
-        distance. Otherwise many low-distance invented segments would dilute
-        the average and make the model look better. A group with no target
-        rows at all (e.g. a single invented segment at feature level, or a
-        slice whose target has no 4-grams) falls back to the plain weighted
-        mean over its rows.
-
             ``combined_w = max(weights[c], target_weights)``
-            ``agg[c] = sum(values[c] * combined_w) / sum(combined_w[target_weights > 0])``
-
-        The result can therefore exceed the largest per-row distance when the
-        model's invented segments outweigh the target's own.
+            ``agg[c] = sum(values[c] * combined_w) / sum(combined_w)``
 
         Args:
             target_weights: Raw per-row target weight, in the same row order
@@ -125,21 +113,16 @@ class ResultFrame:
                 f"{len(self.values)} (one per row, in the same order)"
             )
         target = target_weights.to_numpy(dtype=float)
-        target_present = target > 0
         agg_values: dict[str, Series] = {}
         agg_weights: dict[str, Series] = {}
         for col in self.values.columns:
-            combined = np.maximum(self.weights[col].to_numpy(dtype=float), target)
-            combined_w = Series(combined, index=self.values.index)
-            total = combined_w.groupby(groupby).sum()
-            present_total = (
-                Series(np.where(target_present, combined, 0.0), index=self.values.index)
-                .groupby(groupby)
-                .sum()
+            combined_w = Series(
+                np.maximum(self.weights[col].to_numpy(dtype=float), target),
+                index=self.values.index,
             )
-            denominator = present_total.where(present_total > 0, total)
+            total = combined_w.groupby(groupby).sum()
             weighted = (self.values[col].mul(combined_w)).groupby(groupby).sum()
-            agg_values[col] = (weighted / denominator).fillna(0.0)
+            agg_values[col] = (weighted / total).fillna(0.0)
             agg_weights[col] = total
         units = self.units.groupby(groupby).first() if self.units is not None else None
         return ResultFrame(

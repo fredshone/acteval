@@ -55,7 +55,7 @@ To give a comprehensive estimation of density numerous slices are considered, fo
 
 ### Domains
 
-The default [configuration](https://github.com/fredshone/acteval/blob/main/src/acteval/config.toml) of Acteval disaggregates slices by activity types and includes joint distributions such as start times and durations of an activity type. This results in *a lot* of slices. For convenience, these are aggregated (using weighted averages) into top-level **domain** metrics and mid-level **group** metrics, as follows: 
+The default [configuration](https://github.com/fredshone/acteval/blob/main/src/acteval/config.toml) of Acteval disaggregates slices by activity types and includes joint distributions such as start times and durations of an activity type. This results in *a lot* of slices. For convenience, these are aggregated (using weighted averages, see [How distances are aggregated](#how-distances-are-aggregated)) into top-level **domain** metrics and mid-level **group** metrics, as follows (see the [Lexicon](#lexicon) for these terms):
 
 - **Participations** *- do activities take place the correct number of times?*:
     - **Trip rates** *- are sequences the correct length?*
@@ -447,6 +447,34 @@ gantt(observed)
 
 ## Reading the results
 
+#### Lexicon
+
+Results are reported at several levels of detail. These terms are used consistently throughout the API and this README:
+
+| Term | Meaning | Example | Where it appears |
+|---|---|---|---|
+| **Segment** | One distribution compared between target and model: a single item within a feature. The most granular distance. | the bigram `home>work`; `work0` start times (each person's first work episode) | `segment` index level of the `features` level |
+| **Feature** (or *feature group*) | A family of segments of the same kind, computed by one feature function and switched on/off by one `config.toml` key. | `2-gram`, `participation rate`, `start times` | `feature` index level; one row each at the `groups` level |
+| **Domain** | A family of features answering one question about schedules. | `transitions`, `participations`, `timing`, `creativity`, `feasibility` | `domain` index level; one row each at the `domains` level |
+| **Attribute** | A `split_on` column (or, with `split_order > 1`, a combination of columns). | `gender`; `gender&income` | `label` index level |
+| **Category** | One value of an attribute. | `F`; `F&high` | `cat` index level |
+| **Slice** | The target and model people sharing one attribute category, compared on their own. Every distance is computed within a slice; without `split_on` there is a single slice, the whole population (`label="__split__"`, `cat="all"`). | `gender=F`; `gender=F & income=high` | one `(label, cat)` pair |
+| **Weight** | The size given to a row when averaging rows: how many times its segment occurs (see [How distances are aggregated](#how-distances-are-aggregated)). | 52 `home>work` bigrams | `result.raw["distances"].weights` |
+
+The three **levels**, from most to least detailed, are the `EvalResult` properties `features`, `groups` and `domains`. They're also the first argument of `result.at(level, split)`:
+
+- **`features`**: one row per segment, indexed `(domain, feature, segment)`. The level is named for the features its rows break down; each row is a single segment.
+- **`groups`**: one row per feature, indexed `(domain, feature)`.
+- **`domains`**: one row per domain, indexed `(domain,)`.
+
+Each level can be read three ways (the `split` argument):
+
+- **`combined`**: slices pooled together, one row per segment, feature or domain.
+- **`by_attribute`**: one row per attribute, pooling that attribute's categories. Adds a `label` index level.
+- **`by_category`**: one row per slice. Adds `label` and `cat` index levels.
+
+`by_attribute` and `by_category` require `split_on`. With `split_order > 1`, `order=k` pools the computed slices down to `k`-attribute slices.
+
 #### `EvalResult`
 
 `compare` and `Evaluator` return large amounts of metrics. These are exposed via an `EvalResult` object, which you can use, for example, to extract quick domain summaries with `summary`:
@@ -495,7 +523,37 @@ Each call returns an `AggregatedResult` with `.distances` and `.descriptions` Da
 
 #### `EvalResult.raw`
 
-`EvalResult.raw` exposes the pre-aggregation data (one `ResultFrame` each for descriptions and distances) that every level above is aggregated from — `distances` covers models only (there's no such thing as the target's distance to itself); pair it with `result.target_distance_weights` if you're building custom distance aggregations of your own. Model distance weights are rescaled to the target's size within each slice, and each segment is weighted by the larger of the model and target weights when aggregating, so a segment only one side has keeps its full weight. Segments only the model has (e.g. invented n-grams) count towards the weighted sum but not its normalising total, so they can only increase a distance, never dilute it; a group with no target segments at all falls back to a plain weighted mean.
+`EvalResult.raw` exposes the pre-aggregation data (one `ResultFrame` each for descriptions and distances) that every level above is aggregated from — `distances` covers models only (there's no such thing as the target's distance to itself); pair it with `result.target_distance_weights` if you're building custom distance aggregations of your own (see [How distances are aggregated](#how-distances-are-aggregated)).
+
+#### How distances are aggregated
+
+Every distance starts as one segment row for one slice (see the [Lexicon](#lexicon)). Rows are combined upward with **weighted averages**, where a row's weight is how often its segment occurs.
+
+**Segment weights.** Every segment is weighted by its **count**: how many times it occurs in the slice, counted on each side (target and model). This one rule applies to every feature. The examples below just show what "one occurrence" means for each kind of feature:
+
+| Segment | One occurrence is… | Example weight |
+|---|---|---|
+| a transition n-gram (`home>work`) | one `home>work` transition in someone's schedule | the number of `home>work` bigrams |
+| an activity participation rate (`shop`) | one shop activity | the number of shop activities |
+| a pair participation rate (`home+work`) | one (home, work) pair of episodes in a person's day | the number of such pairs |
+| a timing segment (`work0` start times) | one first work episode | the number of first work episodes |
+| `lengths`, creativity, feasibility | one person's schedule | the number of people |
+
+Count features store each person's count, including zeros for people without the segment, so their occurrences are the sum of those counts. Other features store one value per occurrence, so their occurrences are the number of values. Each feature declares its layout when it is computed, so no list of feature types is needed.
+
+Before comparing the two sides, the model's weights are rescaled to the target's slice size, so a bigger synthetic sample doesn't count for more. The row's weight is then the **larger** of the target's and the model's weight. A segment only one side has (an activity the model never produces, or an n-gram it invents) keeps that side's weight, so a common segment matters however wrong it is. Rare segments carry little weight, whether they are rare observed n-grams or rare inventions.
+
+**Combining rows.**
+
+1. **Segments → features (the `groups` level):** weighted average of the feature's segment rows, using the weights above. Rows from every slice the view pools go into the same average. Weights are counts within each slice, so larger slices automatically count for more when slices are pooled.
+2. **Features → domains (the `domains` level):** *unweighted* mean of the domain's features, so every feature counts equally however many segments or occurrences it has. A few feasibility sub-features are left out to avoid double counting (`DEFAULT_REMOVE_FEATURES` / `DEFAULT_REMOVE_GROUPS` in `_aggregation.py`).
+3. **Slices → split views:** `combined` and `by_attribute` (and lower-`order` views) pool slices through the same weighted averages. The `features` level pools a segment's rows across slices; it never mixes different segments.
+
+**What a missing segment scores.** A count segment that one side lacks is compared against all-zero counts, so its distance is the other side's average count per person. An n-gram the model invents, used by 3% of people once each, scores about 0.03, at a weight of its own occurrence count. It is treated exactly like an observed n-gram the model gets 100% wrong at the same frequency. A timing segment that one side lacks scores the maximum distance, `1.0`.
+
+**A known side-effect.** Because each feature is a weighted *average*, a rare invented segment whose distance is below the feature's average can pull that average down a little. Its influence is limited by its share of the total weight, so in practice it is small. For example, inventing n-grams for 3% of people shifts a 2-gram distance by about 2%. With the earlier people-based weights it was about 20%.
+
+**Ranges.** Creativity and feasibility distances are probabilities in `[0, 1]`, and timing distances are at most `1.0`. Count features compare per-person counts, so a single segment's distance can exceed `1` when counts differ by more than one per person, though in practice they are usually well below. Compare a given feature or domain across models, rather than different domains with each other.
 
 > **Note on timing features:** A distance of `1.0` for a timing feature means the activity is *entirely absent* from the synthetic population — not just timed differently. This is treated as a maximum-penalty missing feature rather than a distributional difference.
 

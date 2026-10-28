@@ -6,13 +6,26 @@ from pandas.testing import assert_series_equal
 from acteval import _aggregation as ops
 
 
-def test_feature_weight():
+def test_segment_count_one_value_per_occurrence():
+    # e.g. start times: every value is one episode, so count the values.
     d = {
         "a": (array([0, 1]), array([10, 10])),
         "b": (array([0, 1, 2]), array([10, 5, 3])),
     }
-    expected = Series({"a": 20, "b": 18})
-    assert_series_equal(ops.feature_weight(d), expected, check_dtype=False)
+    expected = Series({"a": 20.0, "b": 18.0})
+    assert_series_equal(ops.segment_count(d, per_person_counts=False), expected)
+
+
+def test_segment_count_per_person_counts():
+    # Per-person counts: "a" has 10 people with 1 occurrence; "b" has 5 people
+    # with 1 and 3 people with 2. People with 0 add nothing.
+    d = {
+        "a": (array([0, 1]), array([10, 10])),
+        "b": (array([0, 1, 2]), array([10, 5, 3])),
+        "empty": (array([]), array([], dtype=int)),
+    }
+    expected = Series({"a": 10.0, "b": 11.0, "empty": 0.0})
+    assert_series_equal(ops.segment_count(d, per_person_counts=True), expected)
 
 
 def test_average():

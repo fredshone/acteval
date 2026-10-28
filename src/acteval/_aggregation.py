@@ -3,9 +3,10 @@
 Provides two groups of functions:
 
 1. **Per-feature aggregation** (formerly ``ops.py``):
-   ``feature_weight``, ``average``, ``time_average``, ``average2d`` — compute
+   ``segment_count``, ``average``, ``time_average``, ``average2d`` — compute
    weighted statistics over a ``{key: (values, weights)}`` feature dict.
-   These are the ``describe_fn`` implementations plugged into ``JobSpec``.
+   The averages are the ``describe_fn`` implementations plugged into
+   ``JobSpec``; ``segment_count`` gives every segment's aggregation weight.
 
 2. **Multi-tier collapse** (formerly ``post_process.py``):
    Collapse raw per-segment ``ResultFrame``s upward through the three output
@@ -59,8 +60,25 @@ DEFAULT_REMOVE_GROUPS: list[tuple] = [
 # ---------------------------------------------------------------------------
 
 
-def feature_weight(features: dict[str, tuple[ndarray, ndarray]]) -> Series:
-    return Series({k: w.sum() for k, (v, w) in features.items()}, dtype=int)
+def segment_count(
+    features: dict[str, tuple[ndarray, ndarray]], per_person_counts: bool
+) -> Series:
+    """How many times each segment occurs — its weight when averaging segments.
+
+    Rare segments, including ones only one side produces, then carry little
+    weight. How occurrences are counted depends on the feature's layout:
+
+    - ``per_person_counts`` (count features, ``PidFeatures.zero_is_missing``):
+      values are each person's count, zeros included, so occurrences are their
+      sum (e.g. the number of ``home>work`` bigrams).
+    - otherwise: one value per occurrence (e.g. one start time per ``work0``
+      episode), so occurrences are the number of values.
+    """
+    if per_person_counts:
+        counts = {k: float(np.dot(v, w)) for k, (v, w) in features.items()}
+    else:
+        counts = {k: float(w.sum()) for k, (v, w) in features.items()}
+    return Series(counts, dtype=float)
 
 
 def average(

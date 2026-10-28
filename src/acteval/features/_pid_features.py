@@ -25,7 +25,9 @@ class PidFeatures:
         factor: Divisor forwarded to ``compress_feature``.
         zero_is_missing: True for count features (e.g. participation
             counts), where a segment that is zero for everyone means it didn't
-            occur, so ``aggregate_present`` treats it as missing.
+            occur, so ``aggregate_present`` treats it as missing. Values are
+            then per-person counts, so a segment's weight is their sum (see
+            ``_aggregation.segment_count``).
     """
 
     data: dict[str, tuple[ndarray, ndarray]]

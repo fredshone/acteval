@@ -310,7 +310,9 @@ class Evaluator:
                 for spec in self._jobs.density:
                     key = (spec.domain, spec.name)
                     obs_feat = cached_subset[key]
-                    value, weight, _ = _observed_base(spec, obs_feat)
+                    value, weight, _ = _observed_base(
+                        spec, obs_feat, self._target_pid_features[key].zero_is_missing
+                    )
                     value = _tag_density_index(
                         value, spec.domain, spec.name, split, cat
                     )
@@ -648,11 +650,17 @@ class Evaluator:
                     # PidFeatures.aggregate_present). A segment missing on both
                     # sides gets no row; one missing on one side is scored by
                     # _score_features' missing-segment rules.
-                    synth_feat = pid_features[key].aggregate_present(synth_dense_pids)
+                    synth_pf = pid_features[key]
+                    synth_feat = synth_pf.aggregate_present(synth_dense_pids)
 
                     # w = weights, d = descriptive values, s = distance scores
                     w, d, s = _model_contribution(
-                        model, spec, obs_feat, synth_feat, default
+                        model,
+                        spec,
+                        obs_feat,
+                        synth_feat,
+                        default,
+                        synth_pf.zero_is_missing,
                     )
                     dist_weight = w.reindex(s.index, fill_value=0)
                     w = _tag_density_index(w, spec.domain, spec.name, split, cat)
