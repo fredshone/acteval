@@ -205,3 +205,52 @@ def test_distance_weights_use_max_of_both_sides():
     # weights: max(10,10)=10, max(0,10)=10 (target-only keeps full weight), max(4,2)=4
     assert agg.values["m"].iloc[0] == pytest.approx((0 * 10 + 1 * 10 + 0.5 * 4) / 24)
     assert agg.weights["m"].iloc[0] == 24
+
+
+def _novel_rf(values, model_w, target_w, segments):
+    from acteval._result_frame import ResultFrame
+
+    idx = pd.MultiIndex.from_tuples(
+        [("d", "f", s) for s in segments], names=["domain", "feature", "segment"]
+    )
+    rf = ResultFrame(
+        values=DataFrame({"m": values}, index=idx),
+        weights=DataFrame({"m": model_w}, index=idx),
+        units=pd.Series("EMD", index=idx),
+    )
+    return rf, pd.Series(target_w, index=idx, dtype=float)
+
+
+def test_model_only_segments_cannot_dilute_distance():
+    # Two target segments, then add many low-distance model-only segments:
+    # the group distance must not drop below the target-only distance.
+    base_rf, base_t = _novel_rf([0.2, 0.4], [10.0, 10.0], [10.0, 10.0], ["x", "y"])
+    base = base_rf.aggregate_distances(["domain", "feature"], target_weights=base_t)
+    novel = [f"n{i}" for i in range(20)]
+    rf, t = _novel_rf(
+        [0.2, 0.4] + [0.01] * 20,
+        [10.0, 10.0] + [10.0] * 20,
+        [10.0, 10.0] + [0.0] * 20,
+        ["x", "y"] + novel,
+    )
+    agg = rf.aggregate_distances(["domain", "feature"], target_weights=t)
+    assert base.values["m"].iloc[0] == pytest.approx(0.3)
+    # model-only rows add to the numerator only: (2 + 4 + 20 * 0.1) / 20
+    assert agg.values["m"].iloc[0] == pytest.approx((2 + 4 + 2) / 20)
+    assert agg.values["m"].iloc[0] > base.values["m"].iloc[0]
+    assert agg.weights["m"].iloc[0] == 220
+
+
+def test_group_without_target_rows_falls_back_to_weighted_mean():
+    rf, t = _novel_rf([0.1, 0.3], [10.0, 30.0], [0.0, 0.0], ["x", "y"])
+    group = rf.aggregate_distances(["domain", "feature"], target_weights=t)
+    assert group.values["m"].iloc[0] == pytest.approx((1 + 9) / 40)
+    # feature level: each model-only segment reports its own distance
+    seg = rf.aggregate_distances(["domain", "feature", "segment"], target_weights=t)
+    assert list(seg.values["m"]) == pytest.approx([0.1, 0.3])
+
+
+def test_group_with_no_rows_weighted_is_zero():
+    rf, t = _novel_rf([0.0], [0.0], [0.0], ["x"])
+    agg = rf.aggregate_distances(["domain", "feature"], target_weights=t)
+    assert agg.values["m"].iloc[0] == 0.0

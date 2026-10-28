@@ -495,7 +495,7 @@ Each call returns an `AggregatedResult` with `.distances` and `.descriptions` Da
 
 #### `EvalResult.raw`
 
-`EvalResult.raw` exposes the pre-aggregation data (one `ResultFrame` each for descriptions and distances) that every level above is aggregated from — `distances` covers models only (there's no such thing as the target's distance to itself); pair it with `result.target_distance_weights` if you're building custom distance aggregations of your own. Model distance weights are rescaled to the target's size within each slice, and each segment is weighted by the larger of the model and target weights when aggregating, so a segment only one side has keeps its full weight.
+`EvalResult.raw` exposes the pre-aggregation data (one `ResultFrame` each for descriptions and distances) that every level above is aggregated from — `distances` covers models only (there's no such thing as the target's distance to itself); pair it with `result.target_distance_weights` if you're building custom distance aggregations of your own. Model distance weights are rescaled to the target's size within each slice, and each segment is weighted by the larger of the model and target weights when aggregating, so a segment only one side has keeps its full weight. Segments only the model has (e.g. invented n-grams) count towards the weighted sum but not its normalising total, so they can only increase a distance, never dilute it; a group with no target segments at all falls back to a plain weighted mean.
 
 > **Note on timing features:** A distance of `1.0` for a timing feature means the activity is *entirely absent* from the synthetic population — not just timed differently. This is treated as a maximum-penalty missing feature rather than a distributional difference.
 

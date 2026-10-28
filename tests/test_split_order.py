@@ -246,8 +246,11 @@ def test_order1_group_view_matches_positional_pool(order2):
         index=idx,
     )[keep]
     pool["vw"] = pool.v * pool.w
+    # Only target-present rows normalise (see ResultFrame.aggregate_distances).
+    pool["tw"] = np.where(target_w[keep] > 0, pool.w, 0.0)
     grouped = pool.groupby(["domain", "feature", "label", "cat"])
-    expected = grouped.vw.sum() / grouped.w.sum()
+    total, present = grouped.w.sum(), grouped.tw.sum()
+    expected = grouped.vw.sum() / present.where(present > 0, total)
 
     got = order2.at("groups", "by_category", order=1).distances["m"]
     pd.testing.assert_series_equal(
