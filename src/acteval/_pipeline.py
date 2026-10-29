@@ -45,7 +45,6 @@ from acteval._aggregation import segment_count
 from acteval._jobs import CreativityConfig, JobSpec, StructuralConfig
 from acteval._result_frame import ResultFrame
 from acteval.features import creativity, structural
-from acteval.population import Population
 
 
 def _aggregate_features(
@@ -130,15 +129,14 @@ def _model_contribution(
 
 
 def _observed_base_creativity(
-    target_schedules: DataFrame,
-    observed_hash: set,
+    observed_codes: np.ndarray,
     config: CreativityConfig,
 ) -> tuple[Series, Series, Series, Series, Series]:
     """Build target base rows for enabled creativity metrics.
 
     Args:
-        target_schedules: Observed schedule DataFrame.
-        observed_hash: Pre-computed population hash set for this split/cat.
+        observed_codes: One schedule code (``creativity.encode_hashes``) per
+            target person in this split/cat, duplicates included.
         config: Controls which creativity rows to produce.
 
     Returns:
@@ -146,8 +144,7 @@ def _observed_base_creativity(
         Series sharing the same (domain, feature, segment) index. There is no
         ``dist_value``: the target has no distance to itself.
     """
-    obs_diversity = creativity.diversity(target_schedules, observed_hash)
-    n = target_schedules.pid.nunique()
+    n = len(observed_codes)
     names = ["domain", "feature", "segment"]
     desc_idx, desc_weight, desc_val, desc_unit = [], [], [], []
     dist_idx, dist_weight, dist_unit = [], [], []
@@ -155,11 +152,11 @@ def _observed_base_creativity(
     if config.diversity:
         desc_idx.append(("creativity", "diversity", "all"))
         desc_weight.append(n)
-        desc_val.append(obs_diversity)
-        desc_unit.append("prob. unique")
+        desc_val.append(creativity.diversity(observed_codes))
+        desc_unit.append("prob. pair distinct")
         dist_idx.append(("creativity", "homogeneity", "all"))
         dist_weight.append(n)
-        dist_unit.append("prob. not unique")
+        dist_unit.append("prob. pair identical")
     if config.novelty:
         desc_idx.append(("creativity", "novelty", "all"))
         desc_weight.append(n)
@@ -182,31 +179,30 @@ def _observed_base_creativity(
 
 def _model_cols_creativity(
     model: str,
-    pid_hashes: dict,
-    sample_pids,
-    observed_hash: set,
+    synth_codes: np.ndarray,
+    observed_codes: np.ndarray,
     config: CreativityConfig,
 ) -> tuple[Series, Series, Series, Series]:
-    """Compute creativity columns for one model using pre-computed per-pid hashes.
+    """Compute creativity columns for one model from pre-computed schedule codes.
 
     Args:
         model: Model name.
-        pid_hashes: ``{pid: hash_str}`` for the full synthetic population.
-        sample_pids: Pid values for this (split, cat) subset.
-        observed_hash: Pre-cached hash set for this (split, cat) target subset.
+        synth_codes: One schedule code per synthetic person in this
+            (split, cat) subset, from the target's ``encode_hashes`` vocabulary.
+        observed_codes: Distinct schedule codes of this (split, cat) target
+            subset.
         config: Controls which creativity rows to produce.
 
     Returns:
         (desc_value, desc_weight, dist_value, dist_weight) — parallel Series.
     """
-    y_hash = {pid_hashes[p] for p in sample_pids if p in pid_hashes}
-    y_count = len(sample_pids)
-    y_diversity = len(y_hash) / y_count if y_count > 0 else 0
+    y_count = len(synth_codes)
     names = ["domain", "feature", "segment"]
     desc_idx, desc_weight, desc_val = [], [], []
     dist_idx, dist_weight, dist_val = [], [], []
 
     if config.diversity:
+        y_diversity = creativity.diversity(synth_codes)
         desc_idx.append(("creativity", "diversity", "all"))
         desc_weight.append(y_count)
         desc_val.append(y_diversity)
@@ -214,7 +210,7 @@ def _model_cols_creativity(
         dist_weight.append(y_count)
         dist_val.append(1 - y_diversity)
     if config.novelty:
-        y_novelty = creativity.novelty(observed_hash, y_hash)
+        y_novelty = creativity.novelty(observed_codes, synth_codes)
         desc_idx.append(("creativity", "novelty", "all"))
         desc_weight.append(y_count)
         desc_val.append(y_novelty)
@@ -238,20 +234,27 @@ def _model_cols_creativity(
 
 
 def _observed_base_structural(
-    target_schedules: DataFrame, config: StructuralConfig
+    per_pid_flags: dict, target_dense_pids: np.ndarray, config: StructuralConfig
 ) -> tuple[Series, Series, Series]:
     """Build target base rows for enabled structural (feasibility) metrics.
 
     Novel-scoped rows use ``value = 0`` (by definition the observed population
     has no novel schedules).
 
+    Args:
+        per_pid_flags: Output of ``structural.feasibility`` for the full target
+            population, pre-computed once before the split loop.
+        target_dense_pids: Dense pid indices for this split/cat.
+        config: Controls which structural rows to produce.
+
     Returns:
         (value, weight, unit) — parallel Series.
     """
     value_parts, weight_parts, unit_parts = [], [], []
     if config.home_based or config.consecutive:
-        w, m = structural.feasibility_eval(
-            Population(target_schedules),
+        w, m = structural.feasibility_aggregate(
+            per_pid_flags,
+            target_dense_pids,
             name="target",
             home_based=config.home_based,
             consecutive=config.consecutive,
@@ -265,7 +268,7 @@ def _observed_base_structural(
             consecutive=config.consecutive_novel,
             suffix=" (novel)",
         )
-        n = target_schedules.pid.nunique()
+        n = len(target_dense_pids)
         value_parts.append(Series([0.0] * len(idx), index=idx))
         weight_parts.append(Series([n] * len(idx), index=idx))
         unit_parts.append(Series(["prob. infeasible"] * len(idx), index=idx))
