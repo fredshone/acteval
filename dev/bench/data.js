@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793293113493,
+  "lastUpdate": 1793294493057,
   "repoUrl": "https://github.com/fredshone/acteval",
   "entries": {
     "Benchmark": [
@@ -2401,6 +2401,79 @@ window.BENCHMARK_DATA = {
             "unit": "iter/sec",
             "range": "stddev: 0.00025185195646900446",
             "extra": "mean: 194.52974233333484 msec\nrounds: 6"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "26383933+fredshone@users.noreply.github.com",
+            "name": "Fred Shone",
+            "username": "fredshone"
+          },
+          "committer": {
+            "email": "26383933+fredshone@users.noreply.github.com",
+            "name": "Fred Shone",
+            "username": "fredshone"
+          },
+          "distinct": true,
+          "id": "fcfe230e406cd36d67401f2d82aa2138a98669ad",
+          "message": "version 0.5.0",
+          "timestamp": "2026-10-29T17:11:30Z",
+          "tree_id": "89435ad132aa553fda1397000eaee9dea4681280",
+          "url": "https://github.com/fredshone/acteval/commit/fcfe230e406cd36d67401f2d82aa2138a98669ad"
+        },
+        "date": 1793294491964,
+        "tool": "pytest",
+        "benches": [
+          {
+            "name": "tests/test_bench_evaluate.py::test_bench_compare[1k]",
+            "value": 7.942574038030945,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0009034342013812525",
+            "extra": "mean: 125.90376812501347 msec\nrounds: 8"
+          },
+          {
+            "name": "tests/test_bench_evaluate.py::test_bench_compare[20k]",
+            "value": 0.3068547591084087,
+            "unit": "iter/sec",
+            "range": "stddev: 0.03582077790489807",
+            "extra": "mean: 3.258870753400015 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_bench_evaluate.py::test_bench_compare_split_order[order1]",
+            "value": 0.0411285239774697,
+            "unit": "iter/sec",
+            "range": "stddev: 0.057860837871790444",
+            "extra": "mean: 24.31402596766668 sec\nrounds: 3"
+          },
+          {
+            "name": "tests/test_bench_evaluate.py::test_bench_compare_split_order[order2]",
+            "value": 0.025483359706823975,
+            "unit": "iter/sec",
+            "range": "stddev: 0.28080191413073824",
+            "extra": "mean: 39.24129359333332 sec\nrounds: 3"
+          },
+          {
+            "name": "tests/test_bench_pairwise.py::test_pairwise[N=256]",
+            "value": 80.98339261265045,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00018387347743645808",
+            "extra": "mean: 12.348210759495764 msec\nrounds: 79"
+          },
+          {
+            "name": "tests/test_bench_pairwise.py::test_pairwise[N=512]",
+            "value": 19.552117264462577,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00036509159348639746",
+            "extra": "mean: 51.1453561000053 msec\nrounds: 20"
+          },
+          {
+            "name": "tests/test_bench_pairwise.py::test_pairwise[N=1024]",
+            "value": 5.117248836023578,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0011131420089949458",
+            "extra": "mean: 195.41750500002308 msec\nrounds: 6"
           }
         ]
       }
