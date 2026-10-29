@@ -274,14 +274,13 @@ class Evaluator:
         # Phase 2: for each slice (a joint assignment of split_order attributes,
         # built in __init__), restrict the target population to the relevant
         # pids and aggregate their features. The result —
-        # (slice, sub_schedule, cached_feature_dict, n_target_persons) — is
-        # stored in _split_cat_info so compare_population can iterate over it.
+        # (slice, target_dense_pids, cached_feature_dict) — is stored in
+        # _split_cat_info so compare_population can iterate over it.
         self._split_cat_info: list[tuple] = []
         for slice_, target_orig_pids in self._slices:
             target_dense_pids = self._target_pop.dense_pids_from_original(
                 target_orig_pids
             )
-            sub_target = self._target[self._target.pid.isin(target_orig_pids)]
             # Aggregate per-pid features down to population-level distributions
             # for each (domain, name) key — these become the "target" side
             # of every distance calculation. Segments missing from this slice
@@ -290,22 +289,29 @@ class Evaluator:
                 key: pf.aggregate_present(target_dense_pids)
                 for key, pf in self._target_pid_features.items()
             }
-            self._split_cat_info.append(
-                (slice_, sub_target, cached_subset, len(target_dense_pids))
-            )
+            self._split_cat_info.append((slice_, target_dense_pids, cached_subset))
 
         # Phase 3: build the target's per-row (value, weight, unit) Series that
         # will sit alongside the per-model columns in the final ResultFrames.
-        # Also cache sequence hashes for creativity and novel-structural scoring.
+        # Also cache schedule codes for creativity and novel-structural scoring.
+        # Hashes and feasibility flags are computed once for the full target
+        # population; the split loop below only subsets them.
         desc_value_parts: list[Series] = []
         desc_weight_parts: list[Series] = []
         desc_unit_parts: list[Series] = []
         dist_weight_parts: list[Series] = []
         dist_unit_parts: list[Series] = []
-        self._obs_hashes: dict[tuple, object] = {}
+        # Distinct target schedule codes per (split, cat), for novelty.
+        self._obs_codes: dict[tuple, np.ndarray] = {}
         _needs_hashes = (
             self._jobs.creativity.enabled or self._jobs.structural.needs_novel_pids
         )
+        if _needs_hashes:
+            target_codes, self._hash_vocabulary = creativity.encode_hashes(
+                list(creativity.hash_per_pid(self._target_pop).values())
+            )
+        if self._jobs.structural.enabled:
+            target_flags = structural.feasibility(self._target_pop)
 
         with _bar_scope(
             splits_bar,
@@ -314,20 +320,18 @@ class Evaluator:
             self._progress,
             colour="cyan",
         ) as splits_bar:
-            for slice_, sub_target, cached_subset, _ in self._split_cat_info:
+            for slice_, target_dense_pids, cached_subset in self._split_cat_info:
                 split, cat = slice_.key
                 _bar_set_item(
                     splits_bar, cat if split == "__split__" else f"{split}={cat}"
                 )
                 if _needs_hashes:
-                    obs_hash = creativity.hash_population(Population(sub_target))
-                    self._obs_hashes[(split, cat)] = obs_hash
+                    obs_codes = target_codes[target_dense_pids]
+                    self._obs_codes[(split, cat)] = np.unique(obs_codes)
 
                 if self._jobs.creativity.enabled:
                     dv, dw, du, xw, xu = _observed_base_creativity(
-                        sub_target,
-                        self._obs_hashes[(split, cat)],
-                        self._jobs.creativity,
+                        obs_codes, self._jobs.creativity
                     )
                     desc_value_parts.append(_append_split_cat_index(dv, split, cat))
                     desc_weight_parts.append(_append_split_cat_index(dw, split, cat))
@@ -337,7 +341,7 @@ class Evaluator:
 
                 if self._jobs.structural.enabled:
                     sv, sw, su = _observed_base_structural(
-                        sub_target, self._jobs.structural
+                        target_flags, target_dense_pids, self._jobs.structural
                     )
                     sv = _append_split_cat_index(sv, split, cat)
                     sw = _append_split_cat_index(sw, split, cat)
@@ -616,7 +620,9 @@ class Evaluator:
             self._jobs.creativity.enabled or self._jobs.structural.needs_novel_pids
         )
         if _needs_hashes:
-            pid_hashes = creativity.hash_per_pid(pop)
+            synth_codes, _ = creativity.encode_hashes(
+                list(creativity.hash_per_pid(pop).values()), self._hash_vocabulary
+            )
         if self._jobs.structural.enabled:
             feasibility_flags = structural.feasibility(pop)
 
@@ -629,7 +635,7 @@ class Evaluator:
                 attrs: group_pids(attributes, attrs)
                 for attrs in dict.fromkeys(s.attrs for s, *_ in self._split_cat_info)
             }
-            for slice_, _, cached_subset, n_target in self._split_cat_info:
+            for slice_, target_dense_pids, cached_subset in self._split_cat_info:
                 split, cat = slice_.key
                 _bar_set_item(
                     splits_bar, cat if split == "__split__" else f"{split}={cat}"
@@ -641,17 +647,18 @@ class Evaluator:
                 # Model distance weights are rescaled to the target's slice size
                 # (below), so the two sides' weights are comparable whatever
                 # the sample sizes; see ResultFrame.aggregate_distances.
+                n_target = len(target_dense_pids)
                 n_model = len(synth_dense_pids)
                 weight_scale = n_target / n_model if n_model else 0.0
                 slice_dist_start = len(dist_weight_parts)
 
+                if _needs_hashes:
+                    slice_codes = synth_codes[synth_dense_pids]
+                    obs_codes = self._obs_codes[(split, cat)]
+
                 if self._jobs.creativity.enabled:
                     dv, dw, xv, xw = _model_cols_creativity(
-                        model,
-                        pid_hashes,
-                        sample_pids,
-                        self._obs_hashes[(split, cat)],
-                        self._jobs.creativity,
+                        model, slice_codes, obs_codes, self._jobs.creativity
                     )
                     desc_value_parts.append(_append_split_cat_index(dv, split, cat))
                     desc_weight_parts.append(_append_split_cat_index(dw, split, cat))
@@ -661,15 +668,9 @@ class Evaluator:
                 if self._jobs.structural.enabled:
                     novel_dense_pids = None
                     if self._jobs.structural.needs_novel_pids:
-                        obs_hash = self._obs_hashes[(split, cat)]
-                        novel_pids = np.array(
-                            [
-                                p
-                                for p in sample_pids
-                                if pid_hashes.get(p) not in obs_hash
-                            ]
-                        )
-                        novel_dense_pids = pop.dense_pids_from_original(novel_pids)
+                        novel_dense_pids = synth_dense_pids[
+                            np.isin(slice_codes, obs_codes, invert=True)
+                        ]
                     sv, sw = _model_cols_structural(
                         model,
                         feasibility_flags,

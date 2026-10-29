@@ -21,7 +21,6 @@ ACTIVITIES = ["home", "work", "shop", "education", "leisure"]
 SIZES = [
     pytest.param(1_000, id="1k"),
     pytest.param(20_000, id="20k"),
-    pytest.param(100_000, id="100k"),
 ]
 
 
@@ -91,7 +90,7 @@ def dataset(request):
 
 
 def test_bench_compare(benchmark, dataset):
-    """Benchmark the full compare() pipeline at three dataset scales."""
+    """Benchmark the full compare() pipeline at two dataset scales."""
     observed, synthetic = dataset
     benchmark(compare, observed, {"synth": synthetic})
 
@@ -124,14 +123,21 @@ def split_dataset():
 
 @pytest.mark.parametrize("split_order", [1, 2], ids=["order1", "order2"])
 def test_bench_compare_split_order(benchmark, split_dataset, split_order):
-    """Benchmark compare() with attribute slicing at split orders 1 and 2."""
+    """Benchmark compare() with attribute slicing at split orders 1 and 2.
+
+    These are the slowest benchmarks (over a minute per call), so they run a
+    fixed few rounds without pytest-benchmark's calibration runs.
+    """
     observed, synthetic, target_attrs, synth_attrs = split_dataset
-    benchmark(
+    benchmark.pedantic(
         compare,
-        observed,
-        {"synth": synthetic},
-        target_attributes=target_attrs,
-        synthetic_attributes={"synth": synth_attrs},
-        split_on=list(SPLIT_ATTRS),
-        split_order=split_order,
+        args=(observed, {"synth": synthetic}),
+        kwargs=dict(
+            target_attributes=target_attrs,
+            synthetic_attributes={"synth": synth_attrs},
+            split_on=list(SPLIT_ATTRS),
+            split_order=split_order,
+        ),
+        rounds=3,
+        iterations=1,
     )

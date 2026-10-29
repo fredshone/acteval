@@ -83,8 +83,8 @@ This is achieved by additionally supplying **observed** and **synthetic** attrib
 We also supplement these density estimation distances with creativity and feasibility metrics for the synthetic sample as follows:
 
 - **Creativity** *- is my model realistically diverse and does it avoid memorisation?*:
-    - **Diversity** *- are generated samples unique from each other?*
-    - **Novelty** *- are generated samples unique from the observed samples?*
+    - **Diversity** *- are generated samples different from each other?* The probability that two different people, drawn at random, have different schedules (Gini-Simpson index). A schedule shared by a fraction `p` of people costs about `p²`, so a common shared mode such as staying at home all day doesn't dominate the score.
+    - **Novelty** *- are generated samples unique from the observed samples?* The share of distinct generated schedules that don't appear in the observed sample. Counted over distinct schedules rather than people, so it checks for memorisation: reproducing a common schedule many times counts once.
 - **Feasibility** *- does my model avoid structural zeros i.e. unrealistic schedules?*:
     - **Home-based** *- do samples start and end at home?*
     - **Sequences** *- do samples include consecutive work, education or home activities?*

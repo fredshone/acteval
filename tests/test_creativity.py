@@ -1,9 +1,12 @@
+import pytest
 from pandas import DataFrame
 
 from acteval.evaluate import compare
 from acteval.features.creativity import (
     conservatism,
     diversity,
+    encode_hashes,
+    hash_per_pid,
     hash_population,
     hash_schedule,
     homogeneity,
@@ -60,12 +63,12 @@ def test_internal_uniqueness_full():
             {"pid": 1, "act": "work", "duration": 10},
         ]
     )
-    hashed = hash_population(Population(population))
-    assert diversity(population, hashed) == 1
-    assert homogeneity(population, hashed) == 0
+    hashes = list(hash_per_pid(Population(population)).values())
+    assert diversity(hashes) == 1
+    assert homogeneity(hashes) == 0
 
 
-def test_internal_uniqueness_half():
+def test_internal_uniqueness_none():
     population = DataFrame(
         [
             {"pid": 0, "act": "home", "duration": 10},
@@ -76,9 +79,37 @@ def test_internal_uniqueness_half():
             {"pid": 1, "act": "home", "duration": 10},
         ]
     )
-    hashed = hash_population(Population(population))
-    assert diversity(population, hashed) == 0.5
-    assert homogeneity(population, hashed) == 0.5
+    hashes = list(hash_per_pid(Population(population)).values())
+    assert diversity(hashes) == 0
+    assert homogeneity(hashes) == 1
+
+
+def test_diversity_is_probability_two_people_differ():
+    # 4 people: a, a, b, c -> 6 pairs, 1 identical (a, a)
+    assert diversity(["a", "a", "b", "c"]) == pytest.approx(5 / 6)
+    assert homogeneity(["a", "a", "b", "c"]) == pytest.approx(1 / 6)
+
+
+def test_diversity_shared_mode_costs_about_its_share_squared():
+    # 40% share one schedule, the rest are unique: ~1 - 0.4**2, not 1 - 0.4
+    hashes = ["home"] * 400 + [str(i) for i in range(600)]
+    assert diversity(hashes) == pytest.approx(1 - 0.4**2, abs=1e-3)
+
+
+def test_encode_hashes_shares_codes_with_vocabulary():
+    target_codes, vocab = encode_hashes(["a", "b", "a"])
+    assert list(target_codes) == [0, 1, 0]
+    synth_codes, same_vocab = encode_hashes(["b", "c", "c", "a"], vocab)
+    assert same_vocab is vocab
+    # known hashes keep the target's codes; unknown ones get new codes after it
+    assert list(synth_codes) == [1, 2, 2, 0]
+    assert novelty(target_codes, synth_codes) == pytest.approx(1 / 3)
+    assert diversity(synth_codes) == diversity(["b", "c", "c", "a"])
+
+
+def test_diversity_edge_cases():
+    assert diversity([]) == 0
+    assert diversity(["a"]) == 1
 
 
 def test_novelty_none():
