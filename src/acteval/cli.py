@@ -179,7 +179,8 @@ def _discover_batch(
                 schedules.append(f)
 
         if len(schedules) == 0:
-            sys.exit(f"--batch: no schedule file found in {str(subdir)!r}")
+            print(f"WARNING: --batch: no schedule file found in {str(subdir)!r}")
+            continue
         if len(schedules) > 1:
             sys.exit(
                 f"--batch: multiple schedule files found in {str(subdir)!r}: "
@@ -188,9 +189,19 @@ def _discover_batch(
 
         results[subdir.name] = [str(schedules[0]), None]
 
+    if not results:
+        sys.exit(
+            f"--batch: no schedule files found in any subdirectory of {batch_dir!r}"
+        )
+
     # discover attributes
     if attributes_required:
         for subdir in subdirs:
+            if subdir.name not in results:
+                print(
+                    f"WARNING: --batch: skipping {str(subdir)!r} for activity search because no schedule was found"
+                )
+                continue
             files = sorted(
                 p for p in subdir.iterdir() if p.suffix in _EXTS and p.is_file()
             )
@@ -207,7 +218,9 @@ def _discover_batch(
                 kind = _classify_file(str(f))
                 if kind == "attrs":
                     attr_files.append(f)
-
+            if len(attr_files) == 0:
+                print(f"WARNING: --batch: no attributes file found in {str(subdir)!r}")
+                continue
             if len(attr_files) > 1:
                 sys.exit(
                     f"--batch: multiple attributes files found in {str(subdir)!r}: "
