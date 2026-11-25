@@ -393,3 +393,38 @@ def test_aggregate_subset_matches_subset_aggregate(bin_size, factor):
         for k in expected:
             np.testing.assert_array_equal(expected[k][0], got[k][0])
             np.testing.assert_array_equal(expected[k][1], got[k][1])
+
+
+def test_aggregate_subset_sparse_counts_match_subset_aggregate():
+    """zero_is_missing count features take the sparse path; it must match."""
+    from acteval.features._pid_features import PidFeatures
+
+    rng = np.random.default_rng(1)
+    dense_pids = np.arange(200)
+    # Some persons absent from this key's pids (e.g. no valid n-grams).
+    partial_pids = np.sort(rng.choice(200, 150, replace=False))
+    counts = rng.integers(0, 4, size=200) * (rng.random(200) < 0.1)
+    data = {
+        "sparse": (counts, dense_pids),
+        "all zero": (np.zeros(200, dtype=int), dense_pids),
+        "partial": (
+            rng.integers(0, 3, size=150) * (rng.random(150) < 0.2),
+            partial_pids,
+        ),
+        "no zeros": (rng.integers(1, 3, size=200), dense_pids),
+        "empty": (np.array([], dtype=int), np.array([], dtype=np.int64)),
+    }
+    pf = PidFeatures(data=data, zero_is_missing=True)
+    for pid_set in [
+        np.arange(10),
+        rng.choice(200, 60, replace=False),
+        np.array([999]),
+        np.array([], dtype=np.int64),
+        np.arange(200),
+    ]:
+        expected = pf.subset(pid_set).aggregate()
+        got = pf.aggregate_subset(pid_set)
+        assert expected.keys() == got.keys()
+        for k in expected:
+            np.testing.assert_array_equal(expected[k][0], got[k][0])
+            np.testing.assert_array_equal(expected[k][1], got[k][1])

@@ -82,6 +82,7 @@ def _make_args(target, model_pairs, **kwargs):
         split_on=None,
         split_order=None,
         min_split_size=None,
+        workers=None,
         config=None,
         disable=None,
         level="domains",
@@ -626,3 +627,24 @@ def test_parser_no_progress_flag():
     p = _build_parser()
     args = p.parse_args(["compare", "obs.csv", "-m", "m", "syn.csv", "--no-progress"])
     assert args.no_progress is True
+
+
+def test_run_batch_skips_subdirs_without_schedule(csv_files, tmp_path, capsys):
+    """Subdirs with no schedule (empty, or attrs only) are skipped, not fatal."""
+    obs_path, _ = csv_files
+    model = tmp_path / "model_a"
+    model.mkdir()
+    pd.DataFrame(_SYNTHETIC_ROWS).to_csv(model / "sched.csv", index=False)
+    (tmp_path / "eval").mkdir()
+    attrs_only = tmp_path / "notes"
+    attrs_only.mkdir()
+    pd.DataFrame({"pid": [0, 1], "gender": ["m", "f"]}).to_csv(
+        attrs_only / "attrs.csv", index=False
+    )
+    args = _make_args(obs_path, None, batch=str(tmp_path))
+    _run(args)
+    captured = capsys.readouterr()
+    assert "Discovered 1 model(s)" in captured.out
+    assert "model_a" in captured.out
+    assert "skipping" in captured.err
+    assert "eval" in captured.err and "notes" in captured.err

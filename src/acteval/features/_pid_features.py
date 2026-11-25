@@ -81,14 +81,46 @@ class PidFeatures:
                 )
         return result
 
-    def _encode(self, key: str) -> tuple[ndarray, ndarray]:
+    def _encode(self, key: str) -> tuple:
+        """Cache ``key``'s values as integer codes into their sorted uniques.
+
+        Dense form: ``(scaled_uniques, inverse)`` with one code per value.
+
+        Sparse form, for 1-D unbinned ``zero_is_missing`` count features
+        (mostly zeros, e.g. one column per n-gram over every person):
+        ``(scaled_uniques, nz_inverse, nz_pids, zero_code)``, keeping only the
+        nonzero values; a subset's zero count is derived from how many of its
+        entries are nonzero, so per-subset work scales with the nonzeros, not
+        the population.
+        """
         if key not in self._encoded:
-            values = np.asarray(self.data[key][0])
-            if self.bin_size is not None:
-                values = bin_values(values, self.bin_size)
-            uniques, inverse = np.unique(values, axis=0, return_inverse=True)
-            self._encoded[key] = (uniques / self.factor, inverse.reshape(-1))
+            values, pids = self.data[key]
+            values = np.asarray(values)
+            if self.zero_is_missing and self.bin_size is None and values.ndim == 1:
+                nz = np.flatnonzero(values)
+                uniques, nz_inverse = np.unique(
+                    np.concatenate([[0], values[nz]]), return_inverse=True
+                )
+                zero_code = int(nz_inverse[0])
+                self._encoded[key] = (
+                    uniques / self.factor,
+                    nz_inverse[1:].reshape(-1),
+                    np.asarray(pids)[nz],
+                    zero_code,
+                )
+            else:
+                if self.bin_size is not None:
+                    values = bin_values(values, self.bin_size)
+                uniques, inverse = np.unique(values, axis=0, return_inverse=True)
+                self._encoded[key] = (uniques / self.factor, inverse.reshape(-1))
         return self._encoded[key]
+
+    def encode_all(self) -> None:
+        """Fill the per-key encoding cache up front, so concurrent
+        ``aggregate_subset`` calls only read it."""
+        for key, (values, _pids) in self.data.items():
+            if len(values):
+                self._encode(key)
 
     def aggregate_subset(self, pid_set: ndarray) -> dict[str, tuple[ndarray, ndarray]]:
         """Equivalent to ``self.subset(pid_set).aggregate()``, but faster when
@@ -99,20 +131,48 @@ class PidFeatures:
             pid_set: 1-D array of dense pid ints to keep.
         """
         pid_set = np.asarray(pid_set, dtype=np.int64)
-        member_cache: dict[int, ndarray] = {}
         result: dict[str, tuple[ndarray, ndarray]] = {}
+        if len(pid_set) == 0:
+            for key in self.data:
+                result[key] = (np.array([]), np.array([], dtype=np.int64))
+            return result
+        # Pid-space membership lookup, grown to cover every pids array seen.
+        member = np.zeros(pid_set.max() + 1, dtype=bool)
+        member[pid_set] = True
+        mask_cache: dict[int, ndarray] = {}
+        n_cache: dict[int, int] = {}
+
+        def lookup(pids: ndarray) -> ndarray:
+            nonlocal member
+            top = pids.max() if len(pids) else -1
+            if top >= len(member):
+                member = np.concatenate(
+                    [member, np.zeros(top + 1 - len(member), dtype=bool)]
+                )
+            return member[pids]
+
         for key, (values, pids) in self.data.items():
-            if len(values) == 0 or len(pid_set) == 0:
+            if len(values) == 0:
                 result[key] = (np.array([]), np.array([], dtype=np.int64))
                 continue
             pid_id = id(pids)
-            if pid_id not in member_cache:
-                member = np.zeros(max(pids.max(), pid_set.max()) + 1, dtype=bool)
-                member[pid_set] = True
-                member_cache[pid_id] = member[pids]
-            mask = member_cache[pid_id]
-            uniques, inverse = self._encode(key)
-            counts = np.bincount(inverse[mask], minlength=len(uniques))
+            encoded = self._encode(key)
+            if len(encoded) == 4:
+                uniques, nz_inverse, nz_pids, zero_code = encoded
+                # Entries of this pids array in the subset (shared across keys).
+                if pid_id not in n_cache:
+                    n_cache[pid_id] = int(lookup(pids).sum())
+                n_in_subset = n_cache[pid_id]
+                nz_mask = lookup(nz_pids)
+                counts = np.bincount(nz_inverse[nz_mask], minlength=len(uniques))
+                counts[zero_code] += n_in_subset - int(nz_mask.sum())
+            else:
+                uniques, inverse = encoded
+                if pid_id not in mask_cache:
+                    mask_cache[pid_id] = lookup(pids)
+                counts = np.bincount(
+                    inverse[mask_cache[pid_id]], minlength=len(uniques)
+                )
             present = counts > 0
             if not present.any():
                 result[key] = (np.array([]), np.array([], dtype=np.int64))
