@@ -82,6 +82,21 @@ reconstructed from the GitHub release notes and commit history.
   `min_split_size` (`[splits] min_size`) skips slices with too few target
   persons; by default no minimum at order 1 and 30 above.
 
+### Changed
+
+- **Pair participation rates count episode pairs** ([#11]).
+  `participation.joint_participation_rate` previously used `min(n, m) // 2`
+  for two different activities, so a person doing both `home` and `work`
+  usually scored `home+work = 0`. A person with `n` episodes of one activity
+  and `m` of another now scores `n * m`, and `n * (n - 1) / 2` for an activity
+  paired with itself (e.g. `work+work`, previously `n // 2`). **Participation
+  scores differ from 0.2.0.**
+- Activity names that would make two different segments share a feature label
+  now raise a `ValueError` instead of silently merging them. Examples are
+  `work1` and an 11th `work` episode (both `work10`), or `a+b`/`c` and
+  `a`/`b+c` in pair rates (both `a+b+c`). The same applies to `seq_rates` and
+  n-gram labels.
+
 ### Fixed
 
 - Correctness fixes ([#11]):
@@ -97,9 +112,30 @@ reconstructed from the GitHub release notes and commit history.
   - Target weights stay aligned with distances when feature rows are dropped
     before group-level aggregation.
   - Segments missing from a slice are dropped rather than scored, unless the
-    other side has them.
-  - Schedules and attributes must now cover the same pids (raises
-    `ValueError`), and the model names `target` and `unit` are reserved.
+    other side has them. A segment is missing when it has no values or, for
+    count features, when every count is zero. Previously the target kept
+    all-zero rows while the model dropped them by parsing activity names from
+    feature keys, which broke names ending in digits (e.g. `work2`) or
+    containing `>` or `+`, and the optional `seq_rates` and `full_sequences`
+    features. Identical populations with such names now score 0.
+  - Group- and domain-level views below the computed `split_order` (e.g.
+    `result.at("groups", "by_category", order=1)` with `split_order=2`) gave
+    wrong distances, including probabilities above 1. Target weights were
+    matched by label, which those views repeat, so they were
+    cross-multiplied. They are now matched row by row.
+  - Schedules and attributes must now cover the same pids, for the target and
+    every model. A mismatch raises a `ValueError` listing the pids, before any
+    model is evaluated. Previously persons without attributes were silently
+    left out of every slice, and attribute rows without schedules counted
+    towards creativity.
+  - The model names `target` and `unit` are reserved and raise a `ValueError`.
+    They used to silently overwrite those result columns.
+
+### Documentation
+
+- Times must be in minutes: timing features use 15-minute bins and a
+  1440-minute day. The README previously said any consistent unit works; its
+  quick start and the benchmark data now use minutes.
 
 ### Performance
 
