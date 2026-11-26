@@ -4,7 +4,10 @@
 this module is just the API surface that produces one.
 """
 
+import os
 import warnings
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
@@ -45,6 +48,27 @@ _RESERVED_MODEL_NAMES = {
     _TARGET_COL: "the target population's column",
     "unit": "the unit column",
 }
+
+
+def _default_workers() -> int:
+    return max(1, min(8, os.cpu_count() or 1))
+
+
+@contextmanager
+def _slice_executor(workers: int):
+    """A thread pool for scoring slices, or an in-thread stand-in if
+    ``workers == 1`` (keeps tracebacks and profiling simple when serial)."""
+    if workers <= 1:
+
+        class _Serial:
+            @staticmethod
+            def map(fn, items):
+                return map(fn, items)
+
+        yield _Serial()
+        return
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        yield pool
 
 
 def _check_model_names(models) -> None:
@@ -93,8 +117,12 @@ class Evaluator:
         disable: list[str] | None = None,
         split_order: int | None = None,
         min_split_size: int | None = None,
+        workers: int | None = None,
     ):
         target = _coerce_to_pandas(target)
+        if workers is not None and workers < 1:
+            raise ValueError(f"workers must be >= 1, got {workers}")
+        self._workers = workers if workers is not None else _default_workers()
         if target_attributes is not None:
             target_attributes = _coerce_to_pandas(target_attributes)
         if jobs is not None and (config_path is not None or disable):
@@ -271,31 +299,19 @@ class Evaluator:
                 self._target_pid_features[key] = spec.feature_fn(self._target_pop)
                 feature_bar.update(1)
 
-        # Phase 2: for each slice (a joint assignment of split_order attributes,
-        # built in __init__), restrict the target population to the relevant
-        # pids and aggregate their features. The result —
+        # Phase 2 (inside the split loop below, so it's covered by the splits
+        # progress bar): for each slice (a joint assignment of split_order
+        # attributes, built in __init__), restrict the target population to the
+        # relevant pids and aggregate their features. The result —
         # (slice, target_dense_pids, cached_feature_dict) — is stored in
         # _split_cat_info so compare_population can iterate over it.
-        self._split_cat_info: list[tuple] = []
-        for slice_, target_orig_pids in self._slices:
-            target_dense_pids = self._target_pop.dense_pids_from_original(
-                target_orig_pids
-            )
-            # Aggregate per-pid features down to population-level distributions
-            # for each (domain, name) key — these become the "target" side
-            # of every distance calculation. Segments missing from this slice
-            # are dropped, so they get no row unless the model has them.
-            cached_subset = {
-                key: pf.aggregate_present(target_dense_pids)
-                for key, pf in self._target_pid_features.items()
-            }
-            self._split_cat_info.append((slice_, target_dense_pids, cached_subset))
-
+        #
         # Phase 3: build the target's per-row (value, weight, unit) Series that
         # will sit alongside the per-model columns in the final ResultFrames.
         # Also cache schedule codes for creativity and novel-structural scoring.
         # Hashes and feasibility flags are computed once for the full target
         # population; the split loop below only subsets them.
+        self._split_cat_info: list[tuple] = []
         desc_value_parts: list[Series] = []
         desc_weight_parts: list[Series] = []
         desc_unit_parts: list[Series] = []
@@ -316,15 +332,28 @@ class Evaluator:
         with _bar_scope(
             splits_bar,
             "target [splits]",
-            len(self._split_cat_info),
+            len(self._slices),
             self._progress,
             colour="cyan",
         ) as splits_bar:
-            for slice_, target_dense_pids, cached_subset in self._split_cat_info:
+            for slice_, target_orig_pids in self._slices:
                 split, cat = slice_.key
                 _bar_set_item(
                     splits_bar, cat if split == "__split__" else f"{split}={cat}"
                 )
+                target_dense_pids = self._target_pop.dense_pids_from_original(
+                    target_orig_pids
+                )
+                # Aggregate per-pid features down to population-level
+                # distributions for each (domain, name) key — these become the
+                # "target" side of every distance calculation. Segments missing
+                # from this slice are dropped, so they get no row unless the
+                # model has them.
+                cached_subset = {
+                    key: pf.aggregate_present(target_dense_pids)
+                    for key, pf in self._target_pid_features.items()
+                }
+                self._split_cat_info.append((slice_, target_dense_pids, cached_subset))
                 if _needs_hashes:
                     obs_codes = target_codes[target_dense_pids]
                     self._obs_codes[(split, cat)] = np.unique(obs_codes)
@@ -607,11 +636,6 @@ class Evaluator:
                 pid_features[(spec.domain, spec.name)] = spec.feature_fn(pop)
                 feature_bar.update(1)
 
-        desc_value_parts: list[Series] = []
-        desc_weight_parts: list[Series] = []
-        dist_value_parts: list[Series] = []
-        dist_weight_parts: list[Series] = []
-
         # Pre-compute full-population features once (mirrors _precompute_target
         # Phase 1).  Creativity hashes and structural feasibility flags are
         # computed here for the entire synthetic population; the split loop
@@ -619,111 +643,68 @@ class Evaluator:
         _needs_hashes = (
             self._jobs.creativity.enabled or self._jobs.structural.needs_novel_pids
         )
+        synth_codes = None
         if _needs_hashes:
             synth_codes, _ = creativity.encode_hashes(
                 list(creativity.hash_per_pid(pop).values()), self._hash_vocabulary
             )
+        feasibility_flags = None
         if self._jobs.structural.enabled:
             feasibility_flags = structural.feasibility(pop)
+        # Fill PidFeatures' lazy caches now, so the threaded split loop only
+        # ever reads them.
+        for pf in pid_features.values():
+            pf.encode_all()
+        pop.dense_pids_from_original(np.array([], dtype=np.int64))  # build index
+
+        synth_groups = {
+            attrs: group_pids(attributes, attrs)
+            for attrs in dict.fromkeys(s.attrs for s, *_ in self._split_cat_info)
+        }
+        empty_pids = np.array([], dtype=attributes.pid.dtype)
+
+        def score_slice(slice_info):
+            return self._model_slice_parts(
+                model,
+                slice_info,
+                pop,
+                pid_features,
+                synth_groups.get(slice_info[0].attrs, {}),
+                empty_pids,
+                synth_codes,
+                feasibility_flags,
+            )
+
+        desc_value_parts: list[Series] = []
+        desc_weight_parts: list[Series] = []
+        dist_value_parts: list[Series] = []
+        dist_weight_parts: list[Series] = []
 
         # Iterate over (split, category) combinations and subset the
-        # pre-computed features down to the relevant pids.
-        with _bar_scope(
-            splits_bar, f"{model} [splits]", len(self._split_cat_info), self._progress
-        ) as splits_bar:
-            synth_groups = {
-                attrs: group_pids(attributes, attrs)
-                for attrs in dict.fromkeys(s.attrs for s, *_ in self._split_cat_info)
-            }
-            for slice_, target_dense_pids, cached_subset in self._split_cat_info:
-                split, cat = slice_.key
+        # pre-computed features down to the relevant pids. Slices are scored
+        # in a thread pool: the bulk of the time is in POT's 2-D EMD, which
+        # releases the GIL. ``map`` keeps results in slice order.
+        with (
+            _bar_scope(
+                splits_bar,
+                f"{model} [splits]",
+                len(self._split_cat_info),
+                self._progress,
+            ) as splits_bar,
+            _slice_executor(self._workers) as pool,
+        ):
+            for slice_info, parts in zip(
+                self._split_cat_info, pool.map(score_slice, self._split_cat_info)
+            ):
+                split, cat = slice_info[0].key
                 _bar_set_item(
                     splits_bar, cat if split == "__split__" else f"{split}={cat}"
                 )
-                sample_pids = synth_groups[slice_.attrs].get(
-                    slice_.values, np.array([], dtype=attributes.pid.dtype)
-                )
-                synth_dense_pids = pop.dense_pids_from_original(sample_pids)
-                # Model distance weights are rescaled to the target's slice size
-                # (below), so the two sides' weights are comparable whatever
-                # the sample sizes; see ResultFrame.aggregate_distances.
-                n_target = len(target_dense_pids)
-                n_model = len(synth_dense_pids)
-                weight_scale = n_target / n_model if n_model else 0.0
-                slice_dist_start = len(dist_weight_parts)
-
-                if _needs_hashes:
-                    slice_codes = synth_codes[synth_dense_pids]
-                    obs_codes = self._obs_codes[(split, cat)]
-
-                if self._jobs.creativity.enabled:
-                    dv, dw, xv, xw = _model_cols_creativity(
-                        model, slice_codes, obs_codes, self._jobs.creativity
-                    )
-                    desc_value_parts.append(_append_split_cat_index(dv, split, cat))
-                    desc_weight_parts.append(_append_split_cat_index(dw, split, cat))
-                    dist_value_parts.append(_append_split_cat_index(xv, split, cat))
-                    dist_weight_parts.append(_append_split_cat_index(xw, split, cat))
-
-                if self._jobs.structural.enabled:
-                    novel_dense_pids = None
-                    if self._jobs.structural.needs_novel_pids:
-                        novel_dense_pids = synth_dense_pids[
-                            np.isin(slice_codes, obs_codes, invert=True)
-                        ]
-                    sv, sw = _model_cols_structural(
-                        model,
-                        feasibility_flags,
-                        synth_dense_pids,
-                        novel_dense_pids,
-                        self._jobs.structural,
-                    )
-                    sv = _append_split_cat_index(sv.copy(), split, cat)
-                    sw = _append_split_cat_index(sw.copy(), split, cat)
-                    desc_value_parts.append(sv)
-                    desc_weight_parts.append(sw)
-                    dist_value_parts.append(sv)
-                    dist_weight_parts.append(sw)
-
-                for spec in self._jobs.density:
-                    key = (spec.domain, spec.name)
-                    obs_feat = cached_subset[key]
-                    # default holds the observed distribution shape; used as a
-                    # fallback when the synthetic model has no data for a segment.
-                    default = _make_default(obs_feat)
-
-                    # Aggregate pre-computed per-pid features for just the pids
-                    # in this slice, dropping segments missing from it (see
-                    # PidFeatures.aggregate_present). A segment missing on both
-                    # sides gets no row; one missing on one side is scored by
-                    # _score_features' missing-segment rules.
-                    synth_pf = pid_features[key]
-                    synth_feat = synth_pf.aggregate_present(synth_dense_pids)
-
-                    # w = weights, d = descriptive values, s = distance scores
-                    w, d, s = _model_contribution(
-                        model,
-                        spec,
-                        obs_feat,
-                        synth_feat,
-                        default,
-                        synth_pf.zero_is_missing,
-                    )
-                    dist_weight = w.reindex(s.index, fill_value=0)
-                    w = _tag_density_index(w, spec.domain, spec.name, split, cat)
-                    d = _tag_density_index(d, spec.domain, spec.name, split, cat)
-                    s = _tag_density_index(s, spec.domain, spec.name, split, cat)
-                    dist_weight = _tag_density_index(
-                        dist_weight, spec.domain, spec.name, split, cat
-                    )
-                    desc_value_parts.append(d)
-                    desc_weight_parts.append(w)
-                    dist_value_parts.append(s)
-                    dist_weight_parts.append(dist_weight)
-
-                for i in range(slice_dist_start, len(dist_weight_parts)):
-                    dist_weight_parts[i] = dist_weight_parts[i] * weight_scale
-
+                dv, dw, xv, xw = parts
+                desc_value_parts.extend(dv)
+                desc_weight_parts.extend(dw)
+                dist_value_parts.extend(xv)
+                dist_weight_parts.extend(xw)
                 splits_bar.update(1)
 
         # Store results so report() can later concat them alongside the target's
@@ -740,6 +721,110 @@ class Evaluator:
         self.collected_distance_weights[model] = _concat_tagged(
             [p for p in dist_weight_parts if not p.empty]
         )
+
+    def _model_slice_parts(
+        self,
+        model: str,
+        slice_info: tuple,
+        pop: Population,
+        pid_features: dict,
+        synth_group: dict,
+        empty_pids: np.ndarray,
+        synth_codes: np.ndarray | None,
+        feasibility_flags: dict | None,
+    ) -> tuple[list[Series], list[Series], list[Series], list[Series]]:
+        """Score one slice for one model; safe to run concurrently (reads only).
+
+        Returns ``(desc_values, desc_weights, dist_values, dist_weights)``
+        parts for this slice.
+        """
+        slice_, target_dense_pids, cached_subset = slice_info
+        split, cat = slice_.key
+        desc_value_parts: list[Series] = []
+        desc_weight_parts: list[Series] = []
+        dist_value_parts: list[Series] = []
+        dist_weight_parts: list[Series] = []
+
+        sample_pids = synth_group.get(slice_.values, empty_pids)
+        synth_dense_pids = pop.dense_pids_from_original(sample_pids)
+        # Model distance weights are rescaled to the target's slice size
+        # (below), so the two sides' weights are comparable whatever the
+        # sample sizes; see ResultFrame.aggregate_distances.
+        n_target = len(target_dense_pids)
+        n_model = len(synth_dense_pids)
+        weight_scale = n_target / n_model if n_model else 0.0
+
+        if synth_codes is not None:
+            slice_codes = synth_codes[synth_dense_pids]
+            obs_codes = self._obs_codes[(split, cat)]
+
+        if self._jobs.creativity.enabled:
+            dv, dw, xv, xw = _model_cols_creativity(
+                model, slice_codes, obs_codes, self._jobs.creativity
+            )
+            desc_value_parts.append(_append_split_cat_index(dv, split, cat))
+            desc_weight_parts.append(_append_split_cat_index(dw, split, cat))
+            dist_value_parts.append(_append_split_cat_index(xv, split, cat))
+            dist_weight_parts.append(_append_split_cat_index(xw, split, cat))
+
+        if self._jobs.structural.enabled:
+            novel_dense_pids = None
+            if self._jobs.structural.needs_novel_pids:
+                novel_dense_pids = synth_dense_pids[
+                    np.isin(slice_codes, obs_codes, invert=True)
+                ]
+            sv, sw = _model_cols_structural(
+                model,
+                feasibility_flags,
+                synth_dense_pids,
+                novel_dense_pids,
+                self._jobs.structural,
+            )
+            sv = _append_split_cat_index(sv.copy(), split, cat)
+            sw = _append_split_cat_index(sw.copy(), split, cat)
+            desc_value_parts.append(sv)
+            desc_weight_parts.append(sw)
+            dist_value_parts.append(sv)
+            dist_weight_parts.append(sw)
+
+        for spec in self._jobs.density:
+            key = (spec.domain, spec.name)
+            obs_feat = cached_subset[key]
+            # default holds the observed distribution shape; used as a
+            # fallback when the synthetic model has no data for a segment.
+            default = _make_default(obs_feat)
+
+            # Aggregate pre-computed per-pid features for just the pids in
+            # this slice, dropping segments missing from it (see
+            # PidFeatures.aggregate_present). A segment missing on both sides
+            # gets no row; one missing on one side is scored by
+            # _score_features' missing-segment rules.
+            synth_pf = pid_features[key]
+            synth_feat = synth_pf.aggregate_present(synth_dense_pids)
+
+            # w = weights, d = descriptive values, s = distance scores
+            w, d, s = _model_contribution(
+                model,
+                spec,
+                obs_feat,
+                synth_feat,
+                default,
+                synth_pf.zero_is_missing,
+            )
+            dist_weight = w.reindex(s.index, fill_value=0)
+            w = _tag_density_index(w, spec.domain, spec.name, split, cat)
+            d = _tag_density_index(d, spec.domain, spec.name, split, cat)
+            s = _tag_density_index(s, spec.domain, spec.name, split, cat)
+            dist_weight = _tag_density_index(
+                dist_weight, spec.domain, spec.name, split, cat
+            )
+            desc_value_parts.append(d)
+            desc_weight_parts.append(w)
+            dist_value_parts.append(s)
+            dist_weight_parts.append(dist_weight)
+
+        dist_weight_parts = [p * weight_scale for p in dist_weight_parts]
+        return desc_value_parts, desc_weight_parts, dist_value_parts, dist_weight_parts
 
     def report(self) -> EvalResult:
         """Assemble an ``EvalResult`` from previously accumulated model comparisons.
@@ -807,6 +892,7 @@ def compare(
     progress: bool = False,
     split_order: int | None = None,
     min_split_size: int | None = None,
+    workers: int | None = None,
 ) -> EvalResult:
     """Compare observed and synthetic activity schedule populations.
 
@@ -842,6 +928,9 @@ def compare(
         min_split_size: Skip slices with fewer target persons than this.
             Defaults to the config's ``[splits] min_size``, else no minimum at
             order 1 and 30 above.
+        workers: Threads used to score slices for each model (the 2-D EMDs
+            release the GIL, so this scales). Defaults to
+            ``min(8, os.cpu_count())``; ``1`` runs serially.
 
     Returns:
         EvalResult with raw segment-level data; use ``result.at(...)`` or the
@@ -858,6 +947,7 @@ def compare(
         progress=progress,
         split_order=split_order,
         min_split_size=min_split_size,
+        workers=workers,
     )
     return evaluator.compare(
         synthetic_schedules, attributes=synthetic_attributes, verbose=verbose

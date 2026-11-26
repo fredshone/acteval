@@ -147,8 +147,9 @@ def _discover_batch(
     """Discover model subdirs within *batch_dir* and classify their files.
 
     Returns [(model_name, schedule_path, attrs_path | None), ...].
-    Exits with an error if any ambiguity is detected or attrs presence is
-    inconsistent across models.
+    Subdirs with no schedule file are skipped (with a note on stderr). Exits
+    with an error if no subdir has a schedule, any ambiguity is detected, or
+    attrs presence is inconsistent across models.
     """
     root = Path(batch_dir)
     if not root.is_dir():
@@ -161,7 +162,8 @@ def _discover_batch(
     _EXTS = {".csv", ".parquet", ".pq"}
     results: dict[list[str, str | None]] = {}
 
-    # discover schedules
+    # discover schedules; subdirs without one (e.g. an output folder) are skipped
+    skipped: list[Path] = []
     for subdir in subdirs:
         files = sorted(p for p in subdir.iterdir() if p.suffix in _EXTS and p.is_file())
         if not files:
@@ -179,7 +181,8 @@ def _discover_batch(
                 schedules.append(f)
 
         if len(schedules) == 0:
-            sys.exit(f"--batch: no schedule file found in {str(subdir)!r}")
+            skipped.append(subdir)
+            continue
         if len(schedules) > 1:
             sys.exit(
                 f"--batch: multiple schedule files found in {str(subdir)!r}: "
@@ -187,6 +190,17 @@ def _discover_batch(
             )
 
         results[subdir.name] = [str(schedules[0]), None]
+
+    for subdir in skipped:
+        print(
+            f"--batch: skipping {str(subdir)!r} (no schedule file found)",
+            file=sys.stderr,
+        )
+    if not results:
+        sys.exit(
+            f"--batch: no schedule file found in any subdirectory of {batch_dir!r}"
+        )
+    subdirs = [p for p in subdirs if p.name in results]
 
     # discover attributes
     if attributes_required:
@@ -308,6 +322,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "-b",
         metavar="BATCH_DIR",
         help="Directory of model subdirs; schedule and attrs auto-discovered per subdir",
+    )
+    compare.add_argument(
+        "--workers",
+        "-j",
+        type=int,
+        metavar="N",
+        default=None,
+        help="Threads for scoring slices per model (default: min(8, CPU count); 1 = serial)",
     )
     compare.add_argument(
         "--no-progress",
@@ -440,6 +462,7 @@ def _run(args: argparse.Namespace) -> None:
         disable=args.disable,
         split_order=args.split_order,
         min_split_size=args.min_split_size,
+        workers=args.workers,
     )
     # Attrs are only meaningful for splitting; don't pass them when split_on is absent
     attrs_for_evaluator = attributes if args.split_on else None

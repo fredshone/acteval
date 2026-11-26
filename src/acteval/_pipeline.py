@@ -350,8 +350,9 @@ def _score_features(
             return missing_distance
         return distance(_get_or_default(a, k, default), _get_or_default(b, k, default))
 
-    # Serial on purpose: individual EMDs are small and GIL-bound, so a thread
-    # pool costs more in scheduling overhead than it saves.
+    # Serial within a slice: most EMDs here are small. Parallelism happens one
+    # level up, across slices (see Evaluator.compare_population), where the
+    # expensive 2-D EMDs from different slices can overlap.
     metrics = Series({k: _compute(k) for k in index}, name=model)
     metrics = metrics.fillna(0)
     return metrics

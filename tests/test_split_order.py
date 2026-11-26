@@ -314,3 +314,43 @@ def test_cli_split_order_requires_split_on(tmp_path, pops):
     )
     with pytest.raises(SystemExit, match="require --split-on"):
         _run(args)
+
+
+def test_threaded_slices_match_serial(pops, order2):
+    """Scoring slices in a thread pool gives the same result as serially."""
+    obs, syn, ta, sa = pops
+    serial = compare(
+        obs,
+        {"m": syn},
+        target_attributes=ta,
+        synthetic_attributes={"m": sa},
+        split_on=list(ATTRS),
+        split_order=2,
+        min_split_size=0,
+        workers=1,
+    )
+    threaded = compare(
+        obs,
+        {"m": syn},
+        target_attributes=ta,
+        synthetic_attributes={"m": sa},
+        split_on=list(ATTRS),
+        split_order=2,
+        min_split_size=0,
+        workers=4,
+    )
+    for level in ("features", "domains"):
+        for split in ("combined", "by_category"):
+            a = threaded.at(level, split).distances
+            b = serial.at(level, split).distances
+            pd.testing.assert_frame_equal(a, b)
+    pd.testing.assert_frame_equal(
+        threaded.at("features", "by_category").descriptions,
+        serial.at("features", "by_category").descriptions,
+    )
+
+
+def test_workers_must_be_positive(pops):
+    obs, *_ = pops
+    with pytest.raises(ValueError, match="workers"):
+        Evaluator(obs, workers=0)
