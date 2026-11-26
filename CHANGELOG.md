@@ -3,6 +3,32 @@
 All notable changes to acteval are documented here. Entries before 0.5.0 were
 reconstructed from the GitHub release notes and commit history.
 
+## [0.6.0] - 2026-11-26
+
+### Added
+
+- **Slices are scored in parallel** ([#15]). `Evaluator`, `compare()` and
+  `evaluate()` take `workers` (CLI: `--workers` / `-j`), the number of threads
+  used to score slices per model. The default is `min(8, CPU count)`;
+  `workers=1` runs serially. Most of the time goes on POT's 2-D EMD, which
+  releases the GIL, so slices overlap. Results are identical to serial runs
+  and stay in slice order. `workers < 1` raises a `ValueError`.
+
+### Changed
+
+- `--batch` now skips model subdirectories that have no schedule file (e.g. an
+  output folder, or one holding only attributes), with a note on stderr,
+  instead of exiting. It still exits if no subdirectory has a schedule.
+
+### Performance
+
+- Sparse count features (1-D, unbinned, zero-is-missing, e.g. one column per
+  n-gram over every person) keep only their nonzero values, so subsetting them
+  per slice scales with the nonzeros rather than the population.
+- Per-slice pid membership is built once per subset and shared across
+  features.
+- Target slice aggregation now runs inside the target splits progress bar.
+
 ## [0.5.0] - 2026-10-29
 
 ### Changed
@@ -205,6 +231,8 @@ First tagged release.
 [#11]: https://github.com/fredshone/acteval/pull/11
 [#13]: https://github.com/fredshone/acteval/pull/13
 [#14]: https://github.com/fredshone/acteval/pull/14
+[#15]: https://github.com/fredshone/acteval/pull/15
+[0.6.0]: https://github.com/fredshone/acteval/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/fredshone/acteval/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/fredshone/acteval/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/fredshone/acteval/compare/v0.2.0...v0.3.0
